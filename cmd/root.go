@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -16,6 +17,17 @@ import (
 )
 
 var modelFlag string
+
+// Package-level function variables for testability.
+// Tests override these to avoid real provider/executor calls.
+var (
+	newProvider = func(host, model string) (provider.Provider, error) {
+		return provider.NewOllama(host, model)
+	}
+	runCommand = executor.Run
+	ioIn       io.Reader = os.Stdin
+	ioOut      io.Writer = os.Stdout
+)
 
 var rootCmd = &cobra.Command{
 	Use:   "sb [natural language query]",
@@ -54,7 +66,7 @@ func runTranslate(cmd *cobra.Command, args []string) error {
 		model = modelFlag
 	}
 
-	p, err := provider.NewOllama(cfg.Ollama.Host, model)
+	p, err := newProvider(cfg.Ollama.Host, model)
 	if err != nil {
 		return fmt.Errorf("creating provider: %w", err)
 	}
@@ -69,23 +81,23 @@ func runTranslate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("translation failed: %w", err)
 	}
 
-	fmt.Printf("\n  %s\n\n", result)
+	_, _ = fmt.Fprintf(ioOut, "\n  %s\n\n", result)
 
 	level := safety.Classify(result)
 
 	var confirmed bool
 	if level == safety.Destructive {
-		fmt.Println("  Warning: this is a destructive command.")
-		confirmed = executor.Confirm("  Are you sure?", false, os.Stdin, os.Stdout)
+		_, _ = fmt.Fprintln(ioOut, "  Warning: this is a destructive command.")
+		confirmed = executor.Confirm("  Are you sure?", false, ioIn, ioOut)
 	} else {
-		confirmed = executor.Confirm("  Run this?", true, os.Stdin, os.Stdout)
+		confirmed = executor.Confirm("  Run this?", true, ioIn, ioOut)
 	}
 
 	if !confirmed {
-		fmt.Println("  Cancelled.")
+		_, _ = fmt.Fprintln(ioOut, "  Cancelled.")
 		return nil
 	}
 
-	fmt.Println()
-	return executor.Run(result)
+	_, _ = fmt.Fprintln(ioOut)
+	return runCommand(result)
 }

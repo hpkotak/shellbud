@@ -1,6 +1,9 @@
 package prompt
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseResponse(t *testing.T) {
 	tests := []struct {
@@ -85,5 +88,30 @@ func TestBuildUserPrompt(t *testing.T) {
 	want := "OS: darwin, Shell: /bin/zsh\nTranslate to shell command: compress folder"
 	if got != want {
 		t.Errorf("BuildUserPrompt() = %q, want %q", got, want)
+	}
+}
+
+func TestSystemPrompt(t *testing.T) {
+	sp := SystemPrompt()
+
+	if sp == "" {
+		t.Fatal("SystemPrompt() returned empty string")
+	}
+
+	// Key phrases that the system prompt must contain for correct LLM behavior.
+	required := []string{
+		"shell command",
+		"ONLY",
+		"No explanation",
+	}
+	for _, phrase := range required {
+		if !strings.Contains(sp, phrase) {
+			t.Errorf("SystemPrompt() missing required phrase %q", phrase)
+		}
+	}
+
+	// Stability: multiple calls return the same value.
+	if sp2 := SystemPrompt(); sp2 != sp {
+		t.Error("SystemPrompt() not stable across calls")
 	}
 }

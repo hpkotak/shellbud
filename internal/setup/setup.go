@@ -21,12 +21,20 @@ import (
 	"github.com/ollama/ollama/api"
 )
 
+// Package-level function variables for testability.
+// Tests override these to avoid real exec/network calls.
+var (
+	lookPath    = exec.LookPath
+	execCommand = exec.Command
+	platformOS  = platform.OS
+)
+
 // Run executes the interactive setup flow.
 // in and out are injectable for testability.
 func Run(in io.Reader, out io.Writer) error {
 	_, _ = fmt.Fprintln(out, "ShellBud Setup")
 	_, _ = fmt.Fprintln(out, "==============")
-	_, _ = fmt.Fprintf(out, "Platform: %s\n\n", platform.OS())
+	_, _ = fmt.Fprintf(out, "Platform: %s\n\n", platformOS())
 
 	if err := ensureOllamaInstalled(in, out); err != nil {
 		return err
@@ -62,20 +70,20 @@ func Run(in io.Reader, out io.Writer) error {
 }
 
 func ensureOllamaInstalled(in io.Reader, out io.Writer) error {
-	if _, err := exec.LookPath("ollama"); err == nil {
+	if _, err := lookPath("ollama"); err == nil {
 		_, _ = fmt.Fprintln(out, "[ok] Ollama is installed")
 		return nil
 	}
 
 	_, _ = fmt.Fprintln(out, "[!!] Ollama not found")
 
-	switch platform.OS() {
+	switch platformOS() {
 	case "darwin":
 		if !executor.Confirm("Install Ollama via Homebrew?", true, in, out) {
 			return fmt.Errorf("ollama is required. Install it manually from https://ollama.com")
 		}
 		_, _ = fmt.Fprintln(out, "Running: brew install ollama")
-		cmd := exec.Command("brew", "install", "ollama")
+		cmd := execCommand("brew", "install", "ollama")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
@@ -86,14 +94,14 @@ func ensureOllamaInstalled(in io.Reader, out io.Writer) error {
 			return fmt.Errorf("ollama is required. Install it manually from https://ollama.com")
 		}
 		_, _ = fmt.Fprintln(out, "Running: curl -fsSL https://ollama.com/install.sh | sh")
-		cmd := exec.Command("sh", "-c", "curl -fsSL https://ollama.com/install.sh | sh")
+		cmd := execCommand("sh", "-c", "curl -fsSL https://ollama.com/install.sh | sh")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("failed to install ollama: %w", err)
 		}
 	default:
-		return fmt.Errorf("unsupported platform %s. Install Ollama manually from https://ollama.com", platform.OS())
+		return fmt.Errorf("unsupported platform %s. Install Ollama manually from https://ollama.com", platformOS())
 	}
 
 	_, _ = fmt.Fprintln(out, "[ok] Ollama installed")
@@ -114,7 +122,7 @@ func ensureOllamaRunning(host string, in io.Reader, out io.Writer) error {
 	_, _ = fmt.Fprintln(out, "Starting Ollama in background...")
 	// Ollama is a persistent service — we start it but don't own its lifecycle.
 	// It continues running after sb exits, which is the expected behavior.
-	cmd := exec.Command("ollama", "serve")
+	cmd := execCommand("ollama", "serve")
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	if err := cmd.Start(); err != nil {
