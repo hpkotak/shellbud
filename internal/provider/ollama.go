@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"time"
 
-	"github.com/hpkotak/shellbud/internal/platform"
 	"github.com/hpkotak/shellbud/internal/prompt"
 	"github.com/ollama/ollama/api"
 )
@@ -23,7 +23,8 @@ func NewOllama(host, model string) (*OllamaProvider, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parsing ollama host URL: %w", err)
 	}
-	client := api.NewClient(base, http.DefaultClient)
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+	client := api.NewClient(base, httpClient)
 	return &OllamaProvider{client: client, model: model}, nil
 }
 
@@ -47,9 +48,9 @@ func (o *OllamaProvider) Available(ctx context.Context) error {
 // Translate sends the query to Ollama and returns the shell command.
 // Uses Generate (not Chat) because each translation is stateless — no
 // conversation history needed. The callback fires once with Stream=false.
-func (o *OllamaProvider) Translate(ctx context.Context, query string) (string, error) {
+func (o *OllamaProvider) Translate(ctx context.Context, query, osName, shell string) (string, error) {
 	stream := false
-	userPrompt := prompt.BuildUserPrompt(query, platform.OS(), platform.Shell())
+	userPrompt := prompt.BuildUserPrompt(query, osName, shell)
 
 	req := &api.GenerateRequest{
 		Model:  o.model,

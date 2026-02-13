@@ -7,7 +7,8 @@ import "context"
 // Provider translates natural language to a shell command.
 type Provider interface {
 	// Translate sends the user's natural language query and returns the shell command.
-	Translate(ctx context.Context, query string) (string, error)
+	// osName and shell are passed by the caller so providers stay decoupled from platform detection.
+	Translate(ctx context.Context, query, osName, shell string) (string, error)
 
 	// Name returns the provider name (e.g., "ollama").
 	Name() string

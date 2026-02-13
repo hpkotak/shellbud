@@ -4,11 +4,21 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
+
+// Defaults and valid values — single source of truth for the codebase.
+const (
+	DefaultHost     = "http://localhost:11434"
+	DefaultProvider = "ollama"
+	DefaultModel    = "llama3.2:latest"
+)
+
+var ValidProviders = []string{"ollama"}
 
 var ErrNotFound = errors.New("config file not found")
 
@@ -20,6 +30,29 @@ type Config struct {
 
 type Ollama struct {
 	Host string `yaml:"host"`
+}
+
+// Validate checks that config values are valid.
+func (c *Config) Validate() error {
+	if !isValidProvider(c.Provider) {
+		return fmt.Errorf("invalid provider %q (valid: %v)", c.Provider, ValidProviders)
+	}
+	if c.Model == "" {
+		return fmt.Errorf("model cannot be empty")
+	}
+	if _, err := url.Parse(c.Ollama.Host); err != nil {
+		return fmt.Errorf("invalid ollama host URL %q: %w", c.Ollama.Host, err)
+	}
+	return nil
+}
+
+func isValidProvider(p string) bool {
+	for _, v := range ValidProviders {
+		if p == v {
+			return true
+		}
+	}
+	return false
 }
 
 // Dir returns the config directory path (~/.shellbud).
@@ -88,10 +121,10 @@ func marshalConfig(cfg *Config) ([]byte, error) {
 // Default returns a config with sensible defaults.
 func Default() *Config {
 	return &Config{
-		Provider: "ollama",
-		Model:    "llama3.2:latest",
+		Provider: DefaultProvider,
+		Model:    DefaultModel,
 		Ollama: Ollama{
-			Host: "http://localhost:11434",
+			Host: DefaultHost,
 		},
 	}
 }

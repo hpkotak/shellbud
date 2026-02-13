@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/hpkotak/shellbud/internal/config"
 	"github.com/spf13/cobra"
@@ -22,8 +21,7 @@ func init() {
 func runConfigShow(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "No config found. Run 'sb setup' first.\n")
-		return nil
+		return fmt.Errorf("no config found. Run 'sb setup' first")
 	}
 
 	data, err := yaml.Marshal(cfg)

@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -15,47 +16,39 @@ import (
 	"time"
 
 	"github.com/hpkotak/shellbud/internal/config"
+	"github.com/hpkotak/shellbud/internal/executor"
 	"github.com/hpkotak/shellbud/internal/platform"
 	"github.com/ollama/ollama/api"
 )
 
-var scanner *bufio.Scanner
-
-func init() {
-	scanner = bufio.NewScanner(os.Stdin)
-}
-
 // Run executes the interactive setup flow.
-func Run() error {
-	fmt.Println("ShellBud Setup")
-	fmt.Println("==============")
-	fmt.Printf("Platform: %s\n\n", platform.OS())
+// in and out are injectable for testability.
+func Run(in io.Reader, out io.Writer) error {
+	_, _ = fmt.Fprintln(out, "ShellBud Setup")
+	_, _ = fmt.Fprintln(out, "==============")
+	_, _ = fmt.Fprintf(out, "Platform: %s\n\n", platform.OS())
 
-	// Step 1: Check if Ollama is installed
-	if err := ensureOllamaInstalled(); err != nil {
+	if err := ensureOllamaInstalled(in, out); err != nil {
 		return err
 	}
 
-	// Step 2: Check if Ollama is running
-	host := "http://localhost:11434"
-	if err := ensureOllamaRunning(host); err != nil {
+	host := config.DefaultHost
+	if err := ensureOllamaRunning(host, in, out); err != nil {
 		return err
 	}
 
-	// Step 3: Get available models, offer to pull if none
 	client, err := ollamaClient(host)
 	if err != nil {
 		return err
 	}
 
-	model, err := selectModel(client)
+	model, err := selectModel(client, in, out)
 	if err != nil {
 		return err
 	}
 
-	// Step 4: Save config
 	cfg := &config.Config{
-		Provider: "ollama",
+		Provider: config.DefaultProvider,
 		Model:    model,
 		Ollama:   config.Ollama{Host: host},
 	}
@@ -63,26 +56,25 @@ func Run() error {
 		return fmt.Errorf("saving config: %w", err)
 	}
 
-	fmt.Printf("\nConfig saved to %s\n", config.Path())
-	fmt.Println("Ready! Try: sb compress this folder as tar.gz")
+	_, _ = fmt.Fprintf(out, "\nConfig saved to %s\n", config.Path())
+	_, _ = fmt.Fprintln(out, "Ready! Try: sb compress this folder as tar.gz")
 	return nil
 }
 
-func ensureOllamaInstalled() error {
+func ensureOllamaInstalled(in io.Reader, out io.Writer) error {
 	if _, err := exec.LookPath("ollama"); err == nil {
-		fmt.Println("[ok] Ollama is installed")
+		_, _ = fmt.Fprintln(out, "[ok] Ollama is installed")
 		return nil
 	}
 
-	fmt.Println("[!!] Ollama not found")
+	_, _ = fmt.Fprintln(out, "[!!] Ollama not found")
 
 	switch platform.OS() {
 	case "darwin":
-		fmt.Print("Install Ollama via Homebrew? [Y/n]: ")
-		if !readYesNo(true) {
+		if !executor.Confirm("Install Ollama via Homebrew?", true, in, out) {
 			return fmt.Errorf("ollama is required. Install it manually from https://ollama.com")
 		}
-		fmt.Println("Running: brew install ollama")
+		_, _ = fmt.Fprintln(out, "Running: brew install ollama")
 		cmd := exec.Command("brew", "install", "ollama")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -90,11 +82,10 @@ func ensureOllamaInstalled() error {
 			return fmt.Errorf("failed to install ollama: %w", err)
 		}
 	case "linux":
-		fmt.Print("Install Ollama via install script? [Y/n]: ")
-		if !readYesNo(true) {
+		if !executor.Confirm("Install Ollama via install script?", true, in, out) {
 			return fmt.Errorf("ollama is required. Install it manually from https://ollama.com")
 		}
-		fmt.Println("Running: curl -fsSL https://ollama.com/install.sh | sh")
+		_, _ = fmt.Fprintln(out, "Running: curl -fsSL https://ollama.com/install.sh | sh")
 		cmd := exec.Command("sh", "-c", "curl -fsSL https://ollama.com/install.sh | sh")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -105,23 +96,24 @@ func ensureOllamaInstalled() error {
 		return fmt.Errorf("unsupported platform %s. Install Ollama manually from https://ollama.com", platform.OS())
 	}
 
-	fmt.Println("[ok] Ollama installed")
+	_, _ = fmt.Fprintln(out, "[ok] Ollama installed")
 	return nil
 }
 
-func ensureOllamaRunning(host string) error {
+func ensureOllamaRunning(host string, in io.Reader, out io.Writer) error {
 	if isOllamaReachable(host) {
-		fmt.Println("[ok] Ollama is running")
+		_, _ = fmt.Fprintln(out, "[ok] Ollama is running")
 		return nil
 	}
 
-	fmt.Println("[!!] Ollama is not running")
-	fmt.Print("Start Ollama? [Y/n]: ")
-	if !readYesNo(true) {
+	_, _ = fmt.Fprintln(out, "[!!] Ollama is not running")
+	if !executor.Confirm("Start Ollama?", true, in, out) {
 		return fmt.Errorf("ollama must be running. Start it with: ollama serve")
 	}
 
-	fmt.Println("Starting Ollama in background...")
+	_, _ = fmt.Fprintln(out, "Starting Ollama in background...")
+	// Ollama is a persistent service — we start it but don't own its lifecycle.
+	// It continues running after sb exits, which is the expected behavior.
 	cmd := exec.Command("ollama", "serve")
 	cmd.Stdout = nil
 	cmd.Stderr = nil
@@ -129,40 +121,40 @@ func ensureOllamaRunning(host string) error {
 		return fmt.Errorf("failed to start ollama: %w", err)
 	}
 
-	// Wait for it to come up
 	for i := 0; i < 10; i++ {
 		time.Sleep(time.Second)
 		if isOllamaReachable(host) {
-			fmt.Println("[ok] Ollama is running")
+			_, _ = fmt.Fprintln(out, "[ok] Ollama is running")
 			return nil
 		}
-		fmt.Print(".")
+		_, _ = fmt.Fprint(out, ".")
 	}
 
 	return fmt.Errorf("ollama did not start within 10 seconds")
 }
 
-func selectModel(client *api.Client) (string, error) {
-	ctx := context.Background()
+func selectModel(client *api.Client, in io.Reader, out io.Writer) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	models, err := client.List(ctx)
 	if err != nil {
 		return "", fmt.Errorf("listing models: %w", err)
 	}
 
 	if len(models.Models) == 0 {
-		return pullRecommendedModel(client)
+		return pullRecommendedModel(client, in, out)
 	}
 
-	fmt.Println("\nAvailable models:")
+	_, _ = fmt.Fprintln(out, "\nAvailable models:")
 	for i, m := range models.Models {
-		fmt.Printf("  %d. %s\n", i+1, m.Name)
+		_, _ = fmt.Fprintf(out, "  %d. %s\n", i+1, m.Name)
 	}
-	fmt.Printf("\nSelect default model [1]: ")
+	_, _ = fmt.Fprint(out, "\nSelect default model [1]: ")
 
-	scanner.Scan()
-	input := strings.TrimSpace(scanner.Text())
+	input := readLine(in)
 
-	idx := 0 // default to first
+	idx := 0
 	if input != "" {
 		n, err := strconv.Atoi(input)
 		if err != nil || n < 1 || n > len(models.Models) {
@@ -172,19 +164,18 @@ func selectModel(client *api.Client) (string, error) {
 	}
 
 	selected := models.Models[idx].Name
-	fmt.Printf("[ok] Selected: %s\n", selected)
+	_, _ = fmt.Fprintf(out, "[ok] Selected: %s\n", selected)
 	return selected, nil
 }
 
-func pullRecommendedModel(client *api.Client) (string, error) {
-	fmt.Println("\nNo models found. Pull a recommended model?")
-	fmt.Println("  1. llama3.2:3b   (fast, ~2GB)")
-	fmt.Println("  2. codellama:7b  (better for code, ~4GB)")
-	fmt.Println("  3. Skip")
-	fmt.Print("\nSelect [1]: ")
+func pullRecommendedModel(client *api.Client, in io.Reader, out io.Writer) (string, error) {
+	_, _ = fmt.Fprintln(out, "\nNo models found. Pull a recommended model?")
+	_, _ = fmt.Fprintln(out, "  1. llama3.2:3b   (fast, ~2GB)")
+	_, _ = fmt.Fprintln(out, "  2. codellama:7b  (better for code, ~4GB)")
+	_, _ = fmt.Fprintln(out, "  3. Skip")
+	_, _ = fmt.Fprint(out, "\nSelect [1]: ")
 
-	scanner.Scan()
-	input := strings.TrimSpace(scanner.Text())
+	input := readLine(in)
 
 	var model string
 	switch input {
@@ -198,19 +189,23 @@ func pullRecommendedModel(client *api.Client) (string, error) {
 		return "", fmt.Errorf("invalid selection: %s", input)
 	}
 
-	fmt.Printf("Pulling %s (this may take a few minutes)...\n", model)
-	ctx := context.Background()
+	_, _ = fmt.Fprintf(out, "Pulling %s (this may take a few minutes)...\n", model)
+
+	// Model pulls can be large (GBs) — use a generous timeout.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
 	err := client.Pull(ctx, &api.PullRequest{Model: model}, func(resp api.ProgressResponse) error {
 		if resp.Total > 0 {
 			pct := float64(resp.Completed) / float64(resp.Total) * 100
-			fmt.Printf("\r  %.0f%% downloaded", pct)
+			_, _ = fmt.Fprintf(out, "\r  %.0f%% downloaded", pct)
 		}
 		return nil
 	})
 	if err != nil {
 		return "", fmt.Errorf("pulling model: %w", err)
 	}
-	fmt.Printf("\n[ok] %s ready\n", model)
+	_, _ = fmt.Fprintf(out, "\n[ok] %s ready\n", model)
 	return model, nil
 }
 
@@ -219,7 +214,8 @@ func ollamaClient(host string) (*api.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parsing host URL: %w", err)
 	}
-	return api.NewClient(base, http.DefaultClient), nil
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+	return api.NewClient(base, httpClient), nil
 }
 
 func isOllamaReachable(host string) bool {
@@ -232,15 +228,9 @@ func isOllamaReachable(host string) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-func readYesNo(defaultYes bool) bool {
+// readLine reads a single line from the reader, trimming whitespace.
+func readLine(in io.Reader) string {
+	scanner := bufio.NewScanner(in)
 	scanner.Scan()
-	input := strings.TrimSpace(strings.ToLower(scanner.Text()))
-	switch input {
-	case "":
-		return defaultYes
-	case "y", "yes":
-		return true
-	default:
-		return false
-	}
+	return strings.TrimSpace(scanner.Text())
 }

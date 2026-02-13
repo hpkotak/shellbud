@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/hpkotak/shellbud/internal/config"
 	"github.com/hpkotak/shellbud/internal/executor"
+	"github.com/hpkotak/shellbud/internal/platform"
 	"github.com/hpkotak/shellbud/internal/provider"
 	"github.com/hpkotak/shellbud/internal/safety"
 	"github.com/spf13/cobra"
@@ -44,8 +46,7 @@ func runTranslate(cmd *cobra.Command, args []string) error {
 
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "No config found. Run 'sb setup' to get started.")
-		os.Exit(1)
+		return fmt.Errorf("no config found. Run 'sb setup' to get started")
 	}
 
 	model := cfg.Model
@@ -58,10 +59,12 @@ func runTranslate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("creating provider: %w", err)
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	query := strings.Join(args, " ")
 
-	result, err := p.Translate(ctx, query)
+	result, err := p.Translate(ctx, query, platform.OS(), platform.Shell())
 	if err != nil {
 		return fmt.Errorf("translation failed: %w", err)
 	}
