@@ -4,11 +4,18 @@ package provider
 
 import "context"
 
-// Provider translates natural language to a shell command.
+// Message represents a single message in a conversation.
+// Decoupled from any specific LLM API (Ollama, OpenAI, etc.) so callers
+// don't import backend-specific types.
+type Message struct {
+	Role    string // "system", "user", "assistant"
+	Content string
+}
+
+// Provider sends conversations to an LLM backend.
 type Provider interface {
-	// Translate sends the user's natural language query and returns the shell command.
-	// osName and shell are passed by the caller so providers stay decoupled from platform detection.
-	Translate(ctx context.Context, query, osName, shell string) (string, error)
+	// Chat sends the message history and returns the assistant's response.
+	Chat(ctx context.Context, messages []Message) (string, error)
 
 	// Name returns the provider name (e.g., "ollama").
 	Name() string

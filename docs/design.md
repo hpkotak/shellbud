@@ -2,46 +2,61 @@
 
 ## Problem
 
-Shell commands are hard to remember. Tools like `tar`, `find`, `ffmpeg`, `awk` have complex flag syntax that you use just often enough to need them but not enough to memorize. The current workflow is: forget syntax, Google it, copy-paste from Stack Overflow, adapt to your use case.
+Shell commands are hard to remember, and most existing AI shell tools are either one-shot translators (crowded space) or generic chatbot wrappers with no awareness of your actual environment. You end up typing a query, getting a command, and still having to mentally verify it's right for your OS, directory, and context.
 
 ## Solution
 
-`sb` (ShellBud) translates natural language to shell commands using a local LLM.
+`sb` (ShellBud) is a context-aware shell assistant with two modes:
 
+**One-shot** — quick questions from your normal shell:
 ```
-$ sb compress this folder as tar.gz
-  tar -czvf archive.tar.gz ./folder
+$ sb what git branch am I on
 
-  Run this? [Y/n]:
+You're on the main branch.
 ```
 
-The tool asks for confirmation before executing, with extra safety checks for destructive commands.
+**Chat** — interactive sessions for complex tasks:
+```
+$ sb chat
+sb> find the largest files in this project
+
+  > find . -type f -exec du -h {} + | sort -rh | head -20
+  [r]un / [e]xplain / [s]kip: r
+
+(output displayed)
+
+sb> what was the biggest one?
+```
+
+The key differentiator is **deep environment awareness**: ShellBud knows your cwd, git state, directory contents, OS, shell, and architecture. Commands are tailored to your actual context, not generic.
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                    CLI Layer (cmd/)                  │
-│  root.go: parse args → translate → safety → execute │
-│  setup.go: first-run configuration                  │
-│  config.go: view/update settings                    │
-└──────────┬──────────┬──────────┬──────────┬─────────┘
-           │          │          │          │
-     ┌─────▼──┐  ┌────▼───┐ ┌───▼────┐ ┌───▼─────┐
-     │Provider│  │ Safety │ │Executor│ │ Config  │
-     │        │  │        │ │        │ │         │
-     │Ollama  │  │ Regex  │ │Confirm │ │ YAML    │
-     │(future:│  │patterns│ │+ exec  │ │load/save│
-     │AFM,    │  │        │ │        │ │         │
-     │Claude) │  └────────┘ └────────┘ └─────────┘
-     └───┬────┘
-         │
-    ┌────▼────┐
-    │ Prompt  │
-    │         │
-    │System + │
-    │ parser  │
-    └─────────┘
+┌──────────────────────────────────────────────────────────┐
+│                     CLI Layer (cmd/)                      │
+│  root.go: one-shot query → chat → parse → confirm → exec │
+│  chat.go: delegates to repl.Run()                        │
+│  setup.go / config.go: onboarding + settings             │
+└───────┬───────┬──────────┬──────────┬──────────┬─────────┘
+        │       │          │          │          │
+   ┌────▼──┐ ┌──▼───┐ ┌───▼────┐ ┌───▼─────┐ ┌──▼──────┐
+   │Provider│ │ShellEnv│ │ REPL   │ │ Safety  │ │ Config  │
+   │        │ │       │ │        │ │         │ │         │
+   │Chat API│ │Gather │ │Run/    │ │ Regex   │ │ YAML    │
+   │Message │ │Format │ │Explain/│ │patterns │ │load/save│
+   │[]      │ │       │ │Skip    │ │         │ │         │
+   │Ollama  │ └───────┘ └───┬────┘ └─────────┘ └─────────┘
+   └───┬────┘               │
+       │              ┌─────▼────┐
+  ┌────▼────┐         │ Executor │
+  │ Prompt  │         │          │
+  │         │         │Confirm   │
+  │ChatSys  │         │Run       │
+  │PromptFn │         │RunCapture│
+  │ParseChat│         └──────────┘
+  │Response │
+  └─────────┘
 ```
 
 ## Key Design Decisions
@@ -51,45 +66,71 @@ The tool asks for confirmation before executing, with extra safety checks for de
 The `Provider` interface decouples the CLI from any specific LLM backend:
 
 ```go
+type Message struct {
+    Role    string // "system", "user", "assistant"
+    Content string
+}
+
 type Provider interface {
-    Translate(ctx context.Context, query string) (string, error)
+    Chat(ctx context.Context, messages []Message) (string, error)
     Name() string
     Available(ctx context.Context) error
 }
 ```
 
-V1 implements Ollama. The interface enables future backends (Apple Foundation Models, Claude API) without changing the core flow.
+`Message` is defined in the `provider` package (not imported from Ollama) so callers stay decoupled from the backend. The Ollama implementation converts `[]provider.Message` to `[]api.Message` internally.
 
-**Why this matters:** Adding a new LLM backend means implementing 3 methods. Nothing else changes.
+**Why this matters:** Adding a new LLM backend means implementing 3 methods and one type conversion. Nothing else changes.
 
-### 2. Ollama via `Generate` (not `Chat`)
+### 2. Ollama via Chat API
 
-Each translation is an independent request — no conversation history needed. `Generate` is simpler: one system prompt, one user prompt, one response. `Chat` would add unnecessary complexity for stateless command translation.
+Conversations use Ollama's `Chat` endpoint (not `Generate`). One-shot mode is simply a single-turn chat. This gives a unified code path for both modes and enables conversation history in chat mode.
 
-### 3. Safety: Regex, Not LLM
+The system message is rebuilt every turn with fresh environment context (cwd and git state change as commands execute), while conversation history is kept separate and capped at 50 messages.
 
-Destructive command detection uses compiled regex patterns, not LLM classification.
+### 3. Environment Context (the differentiator)
+
+The `shellenv` package gathers a best-effort snapshot before each LLM call:
+
+| Field | Source | Timeout |
+|-------|--------|---------|
+| CWD | `os.Getwd()` | instant |
+| Directory listing | `ls -la` (first 50 lines) | 2s |
+| Git branch | `git rev-parse --abbrev-ref HEAD` | 2s |
+| Git dirty | `git status --porcelain` | 2s |
+| Recent commits | `git log --oneline -5` | 2s |
+| OS / Arch / Shell | `runtime.GOOS` / `runtime.GOARCH` / `$SHELL` | instant |
+| Env vars | Allowlisted: EDITOR, VISUAL, LANG, TERM, HOME, USER | instant |
+
+Individual failures are swallowed — not in a git repo? `GitBranch` is just empty. The snapshot is always best-effort, never an error.
+
+### 4. Safety: Regex, Not LLM
+
+Destructive command detection uses 17 compiled regex patterns, not LLM classification.
 
 **Why:** Safety checks must be deterministic, fast, and independent of the LLM. A regex match on `rm`, `sudo`, `dd` etc. is predictable and testable. Trusting the LLM to classify its own output would be circular.
 
-- Safe commands: "Run this? [Y/n]" (default yes)
-- Destructive commands: "Are you sure? [y/N]" (default no)
+- One-shot mode: safe commands show "Run this? [Y/n]" (default yes), destructive show "Are you sure? [y/N]" (default no)
+- Chat mode: all commands show "[r]un / [e]xplain / [s]kip", destructive commands require an additional "Are you sure? [y/N]" confirmation after choosing run
 
-### 4. Prompt Engineering + Defensive Parsing
+### 5. Response Parsing
 
-The system prompt instructs the LLM to output only the raw command. But LLMs don't always follow instructions, so the response parser defensively handles:
-- Markdown code fences (` ```bash ... ``` `)
-- Inline backticks
-- "$ " prompt prefix
-- Explanatory text after the command
+The LLM is instructed to use fenced code blocks (` ```bash ... ``` `) for commands. `ParseChatResponse()` extracts commands from code blocks via regex, returning both the full text (for display) and the extracted commands (for the action prompt).
 
-**The parser is the reliability layer.** The prompt is a best-effort instruction; the parser handles reality. Both are tested.
+Responses can be:
+- **Text only** — explanation, answer to a question. Displayed as-is, no action prompt.
+- **Text + commands** — explanation with one or more commands in code blocks. Text displayed, then each command gets run/explain/skip.
+- **Commands only** — just code blocks. Treated same as above.
 
-### 5. Config: YAML, Not Viper
+### 6. Output Capture (chat mode)
 
-Three config fields don't need a framework. Raw `gopkg.in/yaml.v3` is simpler, has fewer dependencies, and teaches more Go.
+`RunCapture()` uses `io.MultiWriter` to simultaneously display output to the terminal and buffer it. The captured output (truncated at 8KB) is added to conversation history as a user message so the LLM can reference it in follow-up turns.
 
-### 6. Setup Flow
+### 7. Config: YAML, Not Viper
+
+Three config fields don't need a framework. Raw `gopkg.in/yaml.v3` is simpler and has fewer dependencies.
+
+### 8. Setup Flow
 
 First-run setup handles the entire onboarding:
 1. Detect if Ollama is installed → offer to install
@@ -101,45 +142,79 @@ All actions require user consent. The tool never installs or modifies anything s
 
 ## Data Flow
 
+### One-Shot Mode (`sb "query"`)
+
 ```
-User input          "compress this folder as tar.gz"
-    │
-    ▼
-Args joining        strings.Join(os.Args[1:], " ")
+User input          "what git branch am I on"
     │
     ▼
 Config load         ~/.shellbud/config.yaml → provider, model, host
     │
     ▼
-Provider.Translate  System prompt + user prompt → Ollama API → raw response
+Environment         shellenv.Gather() → cwd, git, dir listing, OS, env vars
     │
     ▼
-ParseResponse       Strip fences/backticks/prefix → clean command
+Build messages      [system: ChatSystemPrompt(env), user: query]
     │
     ▼
-Safety.Classify     Regex patterns → Safe or Destructive
+Provider.Chat       Messages → Ollama Chat API → assistant response
     │
     ▼
-Confirm             Prompt user (default varies by safety level)
+ParseChatResponse   Extract commands from code blocks (if any)
     │
-    ▼
-Executor.Run        $SHELL -c "command" (inherits stdin/stdout/stderr)
+    ├─ No commands → display text, done
+    │
+    └─ Commands found → for each:
+        │
+        ▼
+    Safety.Classify     Regex patterns → Safe or Destructive
+        │
+        ▼
+    Confirm             Run this? / Are you sure?
+        │
+        ▼
+    executor.Run        $SHELL -c "command" (inherits stdio)
 ```
 
-## Future Roadmap
+### Chat Mode (`sb chat`)
 
-| Feature | Description | Complexity |
-|---------|-------------|------------|
-| Apple Foundation Models | Swift helper binary, on-device, free, offline | Medium |
-| Cloud models (Claude API) | New provider implementation | Low |
-| Save & recall | Bookmark commands with labels, search later | Medium |
-| Smart history | Tagged, searchable shell history | Medium |
-| Shell completions | Tab completion for `sb` subcommands | Low (cobra built-in) |
+```
+sb> prompt
+    │
+    ▼
+Environment refresh    shellenv.Gather() (fresh each turn)
+    │
+    ▼
+Build messages         [system: fresh env context] + [history] + [user: input]
+    │
+    ▼
+Provider.Chat          → Ollama Chat API → response
+    │
+    ▼
+Add to history         assistant message appended (capped at 50)
+    │
+    ▼
+ParseChatResponse      Extract commands from code blocks
+    │
+    ├─ No commands → display text
+    │
+    └─ Commands found → for each:
+        │
+        ▼
+    [r]un / [e]xplain / [s]kip
+        │
+        ├─ Run → RunCapture() → output displayed AND added to history
+        ├─ Explain → immediate LLM call → explanation displayed
+        └─ Skip → continue
+    │
+    ▼
+Loop back to sb> prompt
+```
 
 ## Dependencies
 
 | Package | Purpose |
 |---------|---------|
 | `github.com/spf13/cobra` | CLI framework |
-| `github.com/ollama/ollama/api` | Ollama client |
+| `github.com/ollama/ollama/api` | Ollama Chat API client |
 | `gopkg.in/yaml.v3` | Config file parsing |

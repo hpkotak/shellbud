@@ -1,21 +1,33 @@
 # ShellBud (`sb`)
 
-Translate natural language to shell commands using a local LLM.
+A context-aware shell assistant — interact with your shell in natural language.
 
 ```
-$ sb compress this folder as tar.gz
-  tar -czvf archive.tar.gz ./folder
+$ sb what git branch am I on
 
-  Run this? [Y/n]:
+You're on the main branch.
 ```
+
+    $ sb chat
+    ShellBud Chat (type 'exit' to quit)
+
+    sb> find the largest files in this project
+
+      > find . -type f -exec du -h {} + | sort -rh | head -20
+      [r]un / [e]xplain / [s]kip: r
+
+    (output displayed)
+
+    sb> what was the biggest one?
 
 ## Features
 
-- Natural language to shell command translation via Ollama
-- Safety detection for destructive commands (`rm`, `sudo`, `dd`, etc.)
-- Interactive setup — handles Ollama installation and model configuration
-- OS-aware — adapts commands for macOS and Linux
-- Offline — runs entirely on your machine, no cloud API needed
+- **Two modes**: one-shot (`sb "query"`) and interactive chat (`sb chat`)
+- **Context-aware**: knows your cwd, git branch, directory contents, OS, and shell
+- **Conversational**: chat mode remembers what you asked and what commands produced
+- **Safe**: destructive commands (`rm`, `sudo`, `dd`) require double confirmation
+- **Offline**: runs entirely on your machine via Ollama, no cloud API needed
+- **Run / Explain / Skip**: review commands before executing, ask for explanations
 
 ## Install
 
@@ -31,10 +43,13 @@ go install github.com/hpkotak/shellbud@latest
 # First-time setup (installs Ollama if needed, pulls a model)
 sb setup
 
-# Translate natural language to commands
+# One-shot: ask a question, get a command
 sb find all log files larger than 100MB
 sb show disk usage sorted by size
-sb list running docker containers
+sb what's using port 8080
+
+# Interactive chat session
+sb chat
 
 # Override model for a single query
 sb --model codellama:7b write a bash loop from 1 to 10

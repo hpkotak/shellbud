@@ -10,9 +10,10 @@ import (
 
 	"github.com/hpkotak/shellbud/internal/config"
 	"github.com/hpkotak/shellbud/internal/executor"
-	"github.com/hpkotak/shellbud/internal/platform"
+	"github.com/hpkotak/shellbud/internal/prompt"
 	"github.com/hpkotak/shellbud/internal/provider"
 	"github.com/hpkotak/shellbud/internal/safety"
+	"github.com/hpkotak/shellbud/internal/shellenv"
 	"github.com/spf13/cobra"
 )
 
@@ -31,13 +32,16 @@ var (
 
 var rootCmd = &cobra.Command{
 	Use:   "sb [natural language query]",
-	Short: "Translate natural language to shell commands",
-	Long: `ShellBud (sb) translates natural language descriptions into shell commands.
+	Short: "Your shell buddy — ask questions, get commands",
+	Long: `ShellBud (sb) is a context-aware shell assistant.
+Ask questions in natural language and get commands tailored to your environment.
 
 Examples:
-  sb compress this folder as tar.gz
+  sb what git branch am I on
   sb find all files larger than 100MB
-  sb show disk usage sorted by size`,
+  sb compress this folder as tar.gz
+
+For interactive sessions: sb chat`,
 	Args:              cobra.ArbitraryArgs,
 	RunE:              runTranslate,
 	DisableAutoGenTag: true,
@@ -75,29 +79,47 @@ func runTranslate(cmd *cobra.Command, args []string) error {
 	defer cancel()
 
 	query := strings.Join(args, " ")
+	envSnap := shellenv.Gather()
 
-	result, err := p.Translate(ctx, query, platform.OS(), platform.Shell())
+	messages := []provider.Message{
+		{Role: "system", Content: prompt.ChatSystemPrompt(envSnap.Format())},
+		{Role: "user", Content: query},
+	}
+
+	result, err := p.Chat(ctx, messages)
 	if err != nil {
-		return fmt.Errorf("translation failed: %w", err)
+		return fmt.Errorf("query failed: %w", err)
 	}
 
-	_, _ = fmt.Fprintf(ioOut, "\n  %s\n\n", result)
+	parsed := prompt.ParseChatResponse(result)
 
-	level := safety.Classify(result)
+	// Display the full response text.
+	_, _ = fmt.Fprintf(ioOut, "\n%s\n", parsed.Text)
 
-	var confirmed bool
-	if level == safety.Destructive {
-		_, _ = fmt.Fprintln(ioOut, "  Warning: this is a destructive command.")
-		confirmed = executor.Confirm("  Are you sure?", false, ioIn, ioOut)
-	} else {
-		confirmed = executor.Confirm("  Run this?", true, ioIn, ioOut)
+	// If commands were extracted, offer to run each one.
+	for _, command := range parsed.Commands {
+		_, _ = fmt.Fprintf(ioOut, "\n  > %s\n\n", command)
+
+		level := safety.Classify(command)
+
+		var confirmed bool
+		if level == safety.Destructive {
+			_, _ = fmt.Fprintln(ioOut, "  Warning: this is a destructive command.")
+			confirmed = executor.Confirm("  Are you sure?", false, ioIn, ioOut)
+		} else {
+			confirmed = executor.Confirm("  Run this?", true, ioIn, ioOut)
+		}
+
+		if !confirmed {
+			_, _ = fmt.Fprintln(ioOut, "  Skipped.")
+			continue
+		}
+
+		_, _ = fmt.Fprintln(ioOut)
+		if err := runCommand(command); err != nil {
+			return err
+		}
 	}
 
-	if !confirmed {
-		_, _ = fmt.Fprintln(ioOut, "  Cancelled.")
-		return nil
-	}
-
-	_, _ = fmt.Fprintln(ioOut)
-	return runCommand(result)
+	return nil
 }

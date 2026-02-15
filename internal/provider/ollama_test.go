@@ -57,10 +57,10 @@ func TestName(t *testing.T) {
 
 func TestAvailable(t *testing.T) {
 	tests := []struct {
-		name       string
-		model      string
-		handler    http.HandlerFunc
-		wantErr    string
+		name    string
+		model   string
+		handler http.HandlerFunc
+		wantErr string
 	}{
 		{
 			name:  "model found",
@@ -134,7 +134,7 @@ func TestAvailable(t *testing.T) {
 	}
 }
 
-func TestTranslate(t *testing.T) {
+func TestChat(t *testing.T) {
 	tests := []struct {
 		name    string
 		handler http.HandlerFunc
@@ -142,25 +142,48 @@ func TestTranslate(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name: "clean command",
+			name: "clean response",
 			handler: func(w http.ResponseWriter, r *http.Request) {
-				resp := api.GenerateResponse{Response: "tar -czvf archive.tar.gz ./folder", Done: true}
+				resp := api.ChatResponse{
+					Message: api.Message{Role: "assistant", Content: "tar -czvf archive.tar.gz ./folder"},
+					Done:    true,
+				}
 				_ = json.NewEncoder(w).Encode(resp)
 			},
 			want: "tar -czvf archive.tar.gz ./folder",
 		},
 		{
-			name: "code fenced response stripped",
+			name: "response with explanation",
 			handler: func(w http.ResponseWriter, r *http.Request) {
-				resp := api.GenerateResponse{Response: "```bash\nls -la\n```", Done: true}
+				resp := api.ChatResponse{
+					Message: api.Message{
+						Role:    "assistant",
+						Content: "Here's the command:\n```bash\nls -la\n```",
+					},
+					Done: true,
+				}
 				_ = json.NewEncoder(w).Encode(resp)
 			},
-			want: "ls -la",
+			want: "Here's the command:\n```bash\nls -la\n```",
 		},
 		{
 			name: "empty response",
 			handler: func(w http.ResponseWriter, r *http.Request) {
-				resp := api.GenerateResponse{Response: "", Done: true}
+				resp := api.ChatResponse{
+					Message: api.Message{Role: "assistant", Content: ""},
+					Done:    true,
+				}
+				_ = json.NewEncoder(w).Encode(resp)
+			},
+			wantErr: "empty response from model",
+		},
+		{
+			name: "whitespace only response",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				resp := api.ChatResponse{
+					Message: api.Message{Role: "assistant", Content: "   \n  "},
+					Done:    true,
+				}
 				_ = json.NewEncoder(w).Encode(resp)
 			},
 			wantErr: "empty response from model",
@@ -170,12 +193,11 @@ func TestTranslate(t *testing.T) {
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "model not loaded", http.StatusInternalServerError)
 			},
-			wantErr: "ollama generate",
+			wantErr: "ollama chat",
 		},
 		{
 			name: "context cancelled",
 			handler: func(w http.ResponseWriter, r *http.Request) {
-				// Delay just long enough for the client context to expire.
 				time.Sleep(500 * time.Millisecond)
 			},
 			wantErr: "context deadline exceeded",
@@ -196,23 +218,75 @@ func TestTranslate(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			defer cancel()
 
-			got, err := p.Translate(ctx, "test query", "darwin", "/bin/zsh")
+			messages := []Message{
+				{Role: "system", Content: "you are a test assistant"},
+				{Role: "user", Content: "test query"},
+			}
+
+			got, err := p.Chat(ctx, messages)
 			if tt.wantErr == "" {
 				if err != nil {
-					t.Errorf("Translate() unexpected error: %v", err)
+					t.Errorf("Chat() unexpected error: %v", err)
 				}
 				if got != tt.want {
-					t.Errorf("Translate() = %q, want %q", got, tt.want)
+					t.Errorf("Chat() = %q, want %q", got, tt.want)
 				}
 				return
 			}
 			if err == nil {
-				t.Errorf("Translate() expected error containing %q, got nil", tt.wantErr)
+				t.Errorf("Chat() expected error containing %q, got nil", tt.wantErr)
 				return
 			}
 			if !strings.Contains(err.Error(), tt.wantErr) {
-				t.Errorf("Translate() error = %q, want substring %q", err.Error(), tt.wantErr)
+				t.Errorf("Chat() error = %q, want substring %q", err.Error(), tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestChatPassesMessages(t *testing.T) {
+	var receivedMessages []api.Message
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req api.ChatRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		receivedMessages = req.Messages
+
+		resp := api.ChatResponse{
+			Message: api.Message{Role: "assistant", Content: "ok"},
+			Done:    true,
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	p := newTestOllama(t, srv.URL, "test-model")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	messages := []Message{
+		{Role: "system", Content: "system prompt"},
+		{Role: "user", Content: "hello"},
+		{Role: "assistant", Content: "hi there"},
+		{Role: "user", Content: "how are you"},
+	}
+
+	_, err := p.Chat(ctx, messages)
+	if err != nil {
+		t.Fatalf("Chat() unexpected error: %v", err)
+	}
+
+	if len(receivedMessages) != len(messages) {
+		t.Fatalf("received %d messages, want %d", len(receivedMessages), len(messages))
+	}
+
+	for i, want := range messages {
+		got := receivedMessages[i]
+		if got.Role != want.Role || got.Content != want.Content {
+			t.Errorf("message[%d] = {%q, %q}, want {%q, %q}", i, got.Role, got.Content, want.Role, want.Content)
+		}
 	}
 }

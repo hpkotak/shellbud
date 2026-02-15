@@ -16,16 +16,16 @@ import (
 
 // mockProvider implements provider.Provider with configurable return values.
 type mockProvider struct {
-	translateResult string
-	translateErr    error
+	chatResult string
+	chatErr    error
 }
 
-func (m *mockProvider) Translate(_ context.Context, _, _, _ string) (string, error) {
-	return m.translateResult, m.translateErr
+func (m *mockProvider) Chat(_ context.Context, _ []provider.Message) (string, error) {
+	return m.chatResult, m.chatErr
 }
 
-func (m *mockProvider) Name() string                        { return "mock" }
-func (m *mockProvider) Available(_ context.Context) error    { return nil }
+func (m *mockProvider) Name() string                     { return "mock" }
+func (m *mockProvider) Available(_ context.Context) error { return nil }
 
 // saveCmdVars saves the package-level function vars and returns a restore function.
 func saveCmdVars(t *testing.T) func() {
@@ -60,68 +60,79 @@ func setupTestConfig(t *testing.T, cfg *config.Config) {
 
 func TestRunTranslate(t *testing.T) {
 	tests := []struct {
-		name       string
-		args       []string
-		hasConfig  bool
-		mock       *mockProvider
-		input      string // user confirmation input
-		runErr     error  // error from runCommand
-		wantErr    string
-		wantInOut  string // substring expected in output
+		name      string
+		args      []string
+		hasConfig bool
+		mock      *mockProvider
+		input     string // user confirmation input
+		runErr    error  // error from runCommand
+		wantErr   string
+		wantInOut string // substring expected in output
+		wantRun   bool   // expect runCommand to be called
 	}{
 		{
 			name:    "no config",
 			args:    []string{"compress", "folder"},
-			mock:    &mockProvider{translateResult: "tar -czvf folder.tar.gz folder"},
+			mock:    &mockProvider{chatResult: "```bash\ntar -czvf folder.tar.gz folder\n```"},
 			wantErr: "sb setup",
 		},
 		{
 			name:      "safe command, user confirms",
 			args:      []string{"list", "files"},
 			hasConfig: true,
-			mock:      &mockProvider{translateResult: "ls -la"},
+			mock:      &mockProvider{chatResult: "Here you go:\n```bash\nls -la\n```"},
 			input:     "y\n",
 			wantInOut: "ls -la",
+			wantRun:   true,
 		},
 		{
 			name:      "safe command, user declines",
 			args:      []string{"list", "files"},
 			hasConfig: true,
-			mock:      &mockProvider{translateResult: "ls -la"},
+			mock:      &mockProvider{chatResult: "```bash\nls -la\n```"},
 			input:     "n\n",
-			wantInOut: "Cancelled",
+			wantInOut: "Skipped",
 		},
 		{
 			name:      "destructive command, user confirms",
 			args:      []string{"delete", "files"},
 			hasConfig: true,
-			mock:      &mockProvider{translateResult: "rm -rf /tmp/test"},
+			mock:      &mockProvider{chatResult: "```bash\nrm -rf /tmp/test\n```"},
 			input:     "y\n",
 			wantInOut: "Warning: this is a destructive command",
+			wantRun:   true,
 		},
 		{
 			name:      "destructive command, user declines",
 			args:      []string{"delete", "files"},
 			hasConfig: true,
-			mock:      &mockProvider{translateResult: "rm -rf /tmp/test"},
+			mock:      &mockProvider{chatResult: "```bash\nrm -rf /tmp/test\n```"},
 			input:     "n\n",
-			wantInOut: "Cancelled",
+			wantInOut: "Skipped",
 		},
 		{
 			name:      "provider error",
 			args:      []string{"translate", "something"},
 			hasConfig: true,
-			mock:      &mockProvider{translateErr: fmt.Errorf("model not available")},
-			wantErr:   "translation failed",
+			mock:      &mockProvider{chatErr: fmt.Errorf("model not available")},
+			wantErr:   "query failed",
 		},
 		{
 			name:      "run command error",
 			args:      []string{"list", "files"},
 			hasConfig: true,
-			mock:      &mockProvider{translateResult: "ls -la"},
+			mock:      &mockProvider{chatResult: "```bash\nls -la\n```"},
 			input:     "y\n",
 			runErr:    fmt.Errorf("exit status 1"),
 			wantErr:   "exit status 1",
+			wantRun:   true,
+		},
+		{
+			name:      "text only response, no commands",
+			args:      []string{"what", "time", "is", "it"},
+			hasConfig: true,
+			mock:      &mockProvider{chatResult: "I can't tell the current time directly."},
+			wantInOut: "I can't tell the current time directly.",
 		},
 	}
 
@@ -170,13 +181,11 @@ func TestRunTranslate(t *testing.T) {
 				t.Errorf("output = %q, want substring %q", out.String(), tt.wantInOut)
 			}
 
-			// Verify runCommand was called when user confirmed
-			if tt.input == "y\n" && !ranCommand {
+			if tt.wantRun && !ranCommand {
 				t.Error("expected runCommand to be called, but it wasn't")
 			}
-			// Verify runCommand was NOT called when user declined
-			if tt.input == "n\n" && ranCommand {
-				t.Error("runCommand was called after user declined")
+			if !tt.wantRun && ranCommand {
+				t.Error("runCommand was called but shouldn't have been")
 			}
 		})
 	}
@@ -191,7 +200,7 @@ func TestRunTranslateModelFlag(t *testing.T) {
 	var capturedModel string
 	newProvider = func(host, model string) (provider.Provider, error) {
 		capturedModel = model
-		return &mockProvider{translateResult: "echo test"}, nil
+		return &mockProvider{chatResult: "```bash\necho test\n```"}, nil
 	}
 	runCommand = func(cmd string) error { return nil }
 	ioIn = strings.NewReader("y\n")

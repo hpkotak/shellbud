@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
-	"github.com/hpkotak/shellbud/internal/prompt"
 	"github.com/ollama/ollama/api"
 )
 
@@ -45,32 +45,33 @@ func (o *OllamaProvider) Available(ctx context.Context) error {
 	return fmt.Errorf("model %q not found in Ollama", o.model)
 }
 
-// Translate sends the query to Ollama and returns the shell command.
-// Uses Generate (not Chat) because each translation is stateless — no
-// conversation history needed. The callback fires once with Stream=false.
-func (o *OllamaProvider) Translate(ctx context.Context, query, osName, shell string) (string, error) {
-	stream := false
-	userPrompt := prompt.BuildUserPrompt(query, osName, shell)
+// Chat sends the conversation to Ollama and returns the assistant's response.
+// Converts provider.Message to api.Message internally so callers stay decoupled
+// from the Ollama client library.
+func (o *OllamaProvider) Chat(ctx context.Context, messages []Message) (string, error) {
+	apiMessages := make([]api.Message, len(messages))
+	for i, m := range messages {
+		apiMessages[i] = api.Message{Role: m.Role, Content: m.Content}
+	}
 
-	req := &api.GenerateRequest{
-		Model:  o.model,
-		System: prompt.SystemPrompt(),
-		Prompt: userPrompt,
-		Stream: &stream,
+	stream := false
+	req := &api.ChatRequest{
+		Model:    o.model,
+		Messages: apiMessages,
+		Stream:   &stream,
 	}
 
 	var result string
-	err := o.client.Generate(ctx, req, func(resp api.GenerateResponse) error {
-		result = resp.Response
+	err := o.client.Chat(ctx, req, func(resp api.ChatResponse) error {
+		result = resp.Message.Content
 		return nil
 	})
 	if err != nil {
-		return "", fmt.Errorf("ollama generate: %w", err)
+		return "", fmt.Errorf("ollama chat: %w", err)
 	}
 
-	parsed := prompt.ParseResponse(result)
-	if parsed == "" {
+	if strings.TrimSpace(result) == "" {
 		return "", fmt.Errorf("empty response from model")
 	}
-	return parsed, nil
+	return result, nil
 }

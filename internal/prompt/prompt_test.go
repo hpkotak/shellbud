@@ -5,113 +5,111 @@ import (
 	"testing"
 )
 
-func TestParseResponse(t *testing.T) {
+func TestChatSystemPrompt(t *testing.T) {
+	envContext := "OS: darwin (arm64)\nShell: /bin/zsh\nWorking directory: /tmp/test\n"
+	got := ChatSystemPrompt(envContext)
+
+	required := []string{
+		"ShellBud",
+		"shell assistant",
+		"code block",
+		"darwin (arm64)",
+		"/bin/zsh",
+		"/tmp/test",
+	}
+	for _, phrase := range required {
+		if !strings.Contains(got, phrase) {
+			t.Errorf("ChatSystemPrompt() missing %q", phrase)
+		}
+	}
+}
+
+func TestParseChatResponse(t *testing.T) {
 	tests := []struct {
-		name string
-		raw  string
-		want string
+		name         string
+		raw          string
+		wantText     string
+		wantCommands []string
 	}{
 		{
-			name: "clean command",
-			raw:  "tar -czvf archive.tar.gz ./folder",
-			want: "tar -czvf archive.tar.gz ./folder",
+			name:         "text only, no commands",
+			raw:          "The largest file in the directory is main.go at 4.2KB.",
+			wantText:     "The largest file in the directory is main.go at 4.2KB.",
+			wantCommands: nil,
 		},
 		{
-			name: "with leading/trailing whitespace",
-			raw:  "  tar -czvf archive.tar.gz ./folder  \n",
-			want: "tar -czvf archive.tar.gz ./folder",
+			name:         "single command in code block",
+			raw:          "Here's the command:\n```bash\nls -la\n```",
+			wantText:     "Here's the command:\n```bash\nls -la\n```",
+			wantCommands: []string{"ls -la"},
 		},
 		{
-			name: "with code fence bash",
-			raw:  "```bash\ntar -czvf archive.tar.gz ./folder\n```",
-			want: "tar -czvf archive.tar.gz ./folder",
+			name:         "plain code fence without language",
+			raw:          "Try this:\n```\nfind . -name '*.go'\n```",
+			wantText:     "Try this:\n```\nfind . -name '*.go'\n```",
+			wantCommands: []string{"find . -name '*.go'"},
 		},
 		{
-			name: "with code fence sh",
-			raw:  "```sh\ntar -czvf archive.tar.gz ./folder\n```",
-			want: "tar -czvf archive.tar.gz ./folder",
+			name:         "sh language tag",
+			raw:          "```sh\ngrep -r TODO .\n```",
+			wantText:     "```sh\ngrep -r TODO .\n```",
+			wantCommands: []string{"grep -r TODO ."},
 		},
 		{
-			name: "with plain code fence",
-			raw:  "```\nls -la\n```",
-			want: "ls -la",
+			name: "multiple code blocks",
+			raw:  "First, check the branch:\n```bash\ngit branch\n```\nThen check status:\n```bash\ngit status\n```",
+			wantText:     "First, check the branch:\n```bash\ngit branch\n```\nThen check status:\n```bash\ngit status\n```",
+			wantCommands: []string{"git branch", "git status"},
 		},
 		{
-			name: "with inline backticks",
-			raw:  "`ls -la`",
-			want: "ls -la",
+			name:         "empty code block ignored",
+			raw:          "```bash\n\n```",
+			wantText:     "```bash\n\n```",
+			wantCommands: nil,
 		},
 		{
-			name: "with dollar sign prefix",
-			raw:  "$ ls -la",
-			want: "ls -la",
+			name:         "empty string",
+			raw:          "",
+			wantText:     "",
+			wantCommands: nil,
 		},
 		{
-			name: "with explanation after command",
-			raw:  "find . -name '*.log' -size +100M\nThis finds all log files larger than 100MB",
-			want: "find . -name '*.log' -size +100M",
+			name:         "whitespace only",
+			raw:          "   \n  ",
+			wantText:     "",
+			wantCommands: nil,
 		},
 		{
-			name: "with preamble before code fence",
-			raw:  "```\ndu -sh * | sort -rh\n```",
-			want: "du -sh * | sort -rh",
+			name:         "multi-line command in block",
+			raw:          "```bash\nfind . -name '*.log' \\\n  -mtime +30 \\\n  -delete\n```",
+			wantText:     "```bash\nfind . -name '*.log' \\\n  -mtime +30 \\\n  -delete\n```",
+			wantCommands: []string{"find . -name '*.log' \\\n  -mtime +30 \\\n  -delete"},
 		},
 		{
-			name: "empty string",
-			raw:  "",
-			want: "",
-		},
-		{
-			name: "only whitespace",
-			raw:  "   \n  \n  ",
-			want: "",
-		},
-		{
-			name: "dollar sign in code fence",
-			raw:  "```bash\n$ grep -r 'TODO' .\n```",
-			want: "grep -r 'TODO' .",
+			name:         "explanation with command in middle",
+			raw:          "To find large files, use:\n```bash\nfind . -size +100M\n```\nThis will search from the current directory.",
+			wantText:     "To find large files, use:\n```bash\nfind . -size +100M\n```\nThis will search from the current directory.",
+			wantCommands: []string{"find . -size +100M"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ParseResponse(tt.raw)
-			if got != tt.want {
-				t.Errorf("ParseResponse(%q) = %q, want %q", tt.raw, got, tt.want)
+			got := ParseChatResponse(tt.raw)
+
+			if got.Text != tt.wantText {
+				t.Errorf("Text = %q, want %q", got.Text, tt.wantText)
+			}
+
+			if len(got.Commands) != len(tt.wantCommands) {
+				t.Fatalf("Commands count = %d, want %d\ngot: %v", len(got.Commands), len(tt.wantCommands), got.Commands)
+			}
+
+			for i, want := range tt.wantCommands {
+				if got.Commands[i] != want {
+					t.Errorf("Commands[%d] = %q, want %q", i, got.Commands[i], want)
+				}
 			}
 		})
-	}
-}
-
-func TestBuildUserPrompt(t *testing.T) {
-	got := BuildUserPrompt("compress folder", "darwin", "/bin/zsh")
-	want := "OS: darwin, Shell: /bin/zsh\nTranslate to shell command: compress folder"
-	if got != want {
-		t.Errorf("BuildUserPrompt() = %q, want %q", got, want)
-	}
-}
-
-func TestSystemPrompt(t *testing.T) {
-	sp := SystemPrompt()
-
-	if sp == "" {
-		t.Fatal("SystemPrompt() returned empty string")
-	}
-
-	// Key phrases that the system prompt must contain for correct LLM behavior.
-	required := []string{
-		"shell command",
-		"ONLY",
-		"No explanation",
-	}
-	for _, phrase := range required {
-		if !strings.Contains(sp, phrase) {
-			t.Errorf("SystemPrompt() missing required phrase %q", phrase)
-		}
-	}
-
-	// Stability: multiple calls return the same value.
-	if sp2 := SystemPrompt(); sp2 != sp {
-		t.Error("SystemPrompt() not stable across calls")
 	}
 }

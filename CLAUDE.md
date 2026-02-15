@@ -1,6 +1,6 @@
 # ShellBud
 
-CLI tool that translates natural language to shell commands. Binary name: `sb`.
+Context-aware shell assistant — interact with your shell in natural language. Binary name: `sb`.
 
 ## Build & Test
 
@@ -14,11 +14,15 @@ golangci-lint run ./...        # Lint (must pass before commit)
 ## Project Structure
 
 - `main.go` — Entry point, delegates to `cmd.Execute()`
-- `cmd/` — Cobra command handlers (root, setup, config)
-- `internal/provider/` — LLM provider interface + Ollama implementation
-- `internal/prompt/` — System prompt and LLM response parsing
+- `cmd/root.go` — One-shot mode: `sb "query"` (enriched with environment context)
+- `cmd/chat.go` — Chat REPL: `sb chat` (conversational with history)
+- `cmd/` — Also: setup, config show/set, version commands
+- `internal/provider/` — LLM provider interface (Message, Chat) + Ollama Chat API implementation
+- `internal/prompt/` — Chat system prompt, response parser (extracts commands from code blocks)
+- `internal/shellenv/` — Environment context gathering (cwd, git, dir listing, env vars)
+- `internal/repl/` — Interactive REPL loop (run/explain/skip flow, history, output capture)
 - `internal/safety/` — Destructive command detection (regex-based)
-- `internal/executor/` — Command confirmation and execution
+- `internal/executor/` — Command confirmation, execution, and output capture (Run + RunCapture)
 - `internal/config/` — Config file management (~/.shellbud/config.yaml)
 - `internal/setup/` — First-run interactive setup flow
 - `internal/platform/` — OS/shell detection
