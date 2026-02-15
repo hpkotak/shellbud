@@ -12,7 +12,8 @@ func TestChatSystemPrompt(t *testing.T) {
 	required := []string{
 		"ShellBud",
 		"shell assistant",
-		"code block",
+		"valid JSON",
+		"\"commands\"",
 		"darwin (arm64)",
 		"/bin/zsh",
 		"/tmp/test",
@@ -30,66 +31,84 @@ func TestParseChatResponse(t *testing.T) {
 		raw          string
 		wantText     string
 		wantCommands []string
+		wantStruct   bool
 	}{
 		{
-			name:         "text only, no commands",
-			raw:          "The largest file in the directory is main.go at 4.2KB.",
+			name:         "valid json no commands",
+			raw:          `{"text":"The largest file in the directory is main.go at 4.2KB.","commands":[]}`,
 			wantText:     "The largest file in the directory is main.go at 4.2KB.",
 			wantCommands: nil,
+			wantStruct:   true,
 		},
 		{
-			name:         "single command in code block",
-			raw:          "Here's the command:\n```bash\nls -la\n```",
-			wantText:     "Here's the command:\n```bash\nls -la\n```",
+			name:         "valid json single command",
+			raw:          `{"text":"Here's the command.","commands":["ls -la"]}`,
+			wantText:     "Here's the command.",
 			wantCommands: []string{"ls -la"},
+			wantStruct:   true,
 		},
 		{
-			name:         "plain code fence without language",
-			raw:          "Try this:\n```\nfind . -name '*.go'\n```",
-			wantText:     "Try this:\n```\nfind . -name '*.go'\n```",
-			wantCommands: []string{"find . -name '*.go'"},
-		},
-		{
-			name:         "sh language tag",
-			raw:          "```sh\ngrep -r TODO .\n```",
-			wantText:     "```sh\ngrep -r TODO .\n```",
-			wantCommands: []string{"grep -r TODO ."},
-		},
-		{
-			name: "multiple code blocks",
-			raw:  "First, check the branch:\n```bash\ngit branch\n```\nThen check status:\n```bash\ngit status\n```",
-			wantText:     "First, check the branch:\n```bash\ngit branch\n```\nThen check status:\n```bash\ngit status\n```",
+			name:         "valid json multiple commands",
+			raw:          `{"text":"First check branch, then status.","commands":["git branch","git status"]}`,
+			wantText:     "First check branch, then status.",
 			wantCommands: []string{"git branch", "git status"},
+			wantStruct:   true,
 		},
 		{
-			name:         "empty code block ignored",
-			raw:          "```bash\n\n```",
-			wantText:     "```bash\n\n```",
-			wantCommands: nil,
+			name:         "valid json trims commands and drops empty",
+			raw:          `{"text":"Use these.","commands":["  ls -la  ","","   "]}`,
+			wantText:     "Use these.",
+			wantCommands: []string{"ls -la"},
+			wantStruct:   true,
+		},
+		{
+			name:         "valid json missing text falls back to raw",
+			raw:          `{"commands":["echo hi"]}`,
+			wantText:     `{"commands":["echo hi"]}`,
+			wantCommands: []string{"echo hi"},
+			wantStruct:   true,
 		},
 		{
 			name:         "empty string",
 			raw:          "",
 			wantText:     "",
 			wantCommands: nil,
+			wantStruct:   false,
 		},
 		{
 			name:         "whitespace only",
 			raw:          "   \n  ",
 			wantText:     "",
 			wantCommands: nil,
+			wantStruct:   false,
 		},
 		{
-			name:         "multi-line command in block",
-			raw:          "```bash\nfind . -name '*.log' \\\n  -mtime +30 \\\n  -delete\n```",
-			wantText:     "```bash\nfind . -name '*.log' \\\n  -mtime +30 \\\n  -delete\n```",
-			wantCommands: []string{"find . -name '*.log' \\\n  -mtime +30 \\\n  -delete"},
+			name:         "invalid plain text fails closed",
+			raw:          "ls -la",
+			wantText:     "ls -la",
+			wantCommands: nil,
+			wantStruct:   false,
 		},
 		{
-			name:         "explanation with command in middle",
-			raw:          "To find large files, use:\n```bash\nfind . -size +100M\n```\nThis will search from the current directory.",
-			wantText:     "To find large files, use:\n```bash\nfind . -size +100M\n```\nThis will search from the current directory.",
-			wantCommands: []string{"find . -size +100M"},
+			name:         "invalid fenced text fails closed",
+			raw:          "```bash\nls -la\n```",
+			wantText:     "```bash\nls -la\n```",
+			wantCommands: nil,
+			wantStruct:   false,
+		},
+		{
+			name:         "invalid json wrong commands type fails closed",
+			raw:          `{"text":"oops","commands":"ls -la"}`,
+			wantText:     `{"text":"oops","commands":"ls -la"}`,
+			wantCommands: nil,
+			wantStruct:   false,
+		},
+		{
+			name:         "json with extra surrounding text fails closed",
+			raw:          "Here:\n{\"text\":\"ok\",\"commands\":[\"ls -la\"]}",
+			wantText:     "Here:\n{\"text\":\"ok\",\"commands\":[\"ls -la\"]}",
+			wantCommands: nil,
+			wantStruct:   false,
 		},
 	}
 
@@ -103,6 +122,9 @@ func TestParseChatResponse(t *testing.T) {
 
 			if len(got.Commands) != len(tt.wantCommands) {
 				t.Fatalf("Commands count = %d, want %d\ngot: %v", len(got.Commands), len(tt.wantCommands), got.Commands)
+			}
+			if got.Structured != tt.wantStruct {
+				t.Errorf("Structured = %v, want %v", got.Structured, tt.wantStruct)
 			}
 
 			for i, want := range tt.wantCommands {

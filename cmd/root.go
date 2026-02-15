@@ -25,7 +25,7 @@ var (
 	newProvider = func(host, model string) (provider.Provider, error) {
 		return provider.NewOllama(host, model)
 	}
-	runCommand = executor.Run
+	runCommand           = executor.Run
 	ioIn       io.Reader = os.Stdin
 	ioOut      io.Writer = os.Stdout
 )
@@ -95,6 +95,9 @@ func runTranslate(cmd *cobra.Command, args []string) error {
 
 	// Display the full response text.
 	_, _ = fmt.Fprintf(ioOut, "\n%s\n", parsed.Text)
+	if !parsed.Structured {
+		_, _ = fmt.Fprintln(ioOut, "  Note: model response was not valid structured output; no commands were run.")
+	}
 
 	// If commands were extracted, offer to run each one.
 	for _, command := range parsed.Commands {

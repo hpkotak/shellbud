@@ -1,12 +1,11 @@
 // Package prompt handles LLM prompt construction and response parsing.
-// The parser is the reliability layer — it defensively handles LLM output
-// quirks (code fences, backticks, explanatory text) regardless of how well
-// the system prompt constrains the model.
+// The parser enforces a structured response contract so command execution
+// remains deterministic and fail-closed even when model output drifts.
 package prompt
 
 import (
+	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 )
 
@@ -18,8 +17,11 @@ func ChatSystemPrompt(envContext string) string {
 Current environment:
 %s
 Guidelines:
-- When suggesting a command, put it in a fenced code block (triple backticks).
-- You can explain, suggest commands, answer questions, or do all three.
+- Respond with ONLY valid JSON. Do not include markdown or code fences.
+- Use this exact schema: {"text":"...","commands":["..."]}.
+- The "text" field is concise, user-facing guidance.
+- The "commands" field contains zero or more executable shell commands.
+- Use an empty array when no command should be run.
 - Use standard tools available on the user's OS.
 - Prefer common, well-known commands over obscure alternatives.
 - Be concise. Don't over-explain unless asked.
@@ -29,31 +31,60 @@ Guidelines:
 // ParsedResponse represents a structured LLM chat response.
 type ParsedResponse struct {
 	Text     string   // full response text for display
-	Commands []string // commands extracted from code blocks
+	Commands []string // executable commands from structured JSON only
+	// Structured is true only when the response was valid structured JSON.
+	Structured bool
 }
 
-// codeBlockRe matches fenced code blocks: ```lang\n...\n``` or ```\n...\n```
-var codeBlockRe = regexp.MustCompile("(?s)```[a-zA-Z]*\\n(.*?)```")
+type structuredChatResponse struct {
+	Text     string   `json:"text"`
+	Commands []string `json:"commands"`
+}
 
-// ParseChatResponse parses an LLM chat response, extracting any commands
-// from fenced code blocks while preserving the full text.
+// ParseChatResponse parses an LLM chat response. Commands are accepted only
+// from valid structured JSON to keep execution fail-closed.
 func ParseChatResponse(raw string) ParsedResponse {
 	text := strings.TrimSpace(raw)
 	if text == "" {
 		return ParsedResponse{}
 	}
 
-	var commands []string
-	matches := codeBlockRe.FindAllStringSubmatch(text, -1)
-	for _, m := range matches {
-		cmd := strings.TrimSpace(m[1])
-		if cmd != "" {
-			commands = append(commands, cmd)
-		}
+	parsed, err := parseStructuredChatResponse(text)
+	if err != nil {
+		// Fail closed: preserve text for display, but offer no runnable commands.
+		return ParsedResponse{Text: text, Structured: false}
+	}
+
+	return parsed
+}
+
+func parseStructuredChatResponse(text string) (ParsedResponse, error) {
+	var decoded structuredChatResponse
+	if err := json.Unmarshal([]byte(text), &decoded); err != nil {
+		return ParsedResponse{}, err
+	}
+
+	commands := normalizeCommands(decoded.Commands)
+	displayText := strings.TrimSpace(decoded.Text)
+	if displayText == "" {
+		displayText = text
 	}
 
 	return ParsedResponse{
-		Text:     text,
-		Commands: commands,
+		Text:       displayText,
+		Commands:   commands,
+		Structured: true,
+	}, nil
+}
+
+func normalizeCommands(commands []string) []string {
+	var out []string
+	for _, cmd := range commands {
+		trimmed := strings.TrimSpace(cmd)
+		if trimmed == "" {
+			continue
+		}
+		out = append(out, trimmed)
 	}
+	return out
 }

@@ -3,6 +3,7 @@ package repl
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -28,7 +29,7 @@ func (m *mockProvider) Chat(_ context.Context, msgs []provider.Message) (string,
 	return "", fmt.Errorf("no more responses configured")
 }
 
-func (m *mockProvider) Name() string                     { return "mock" }
+func (m *mockProvider) Name() string                      { return "mock" }
 func (m *mockProvider) Available(_ context.Context) error { return nil }
 
 // errProvider always returns an error.
@@ -37,8 +38,16 @@ type errProvider struct{}
 func (e *errProvider) Chat(_ context.Context, _ []provider.Message) (string, error) {
 	return "", fmt.Errorf("model unavailable")
 }
-func (e *errProvider) Name() string                     { return "err" }
+func (e *errProvider) Name() string                      { return "err" }
 func (e *errProvider) Available(_ context.Context) error { return nil }
+
+type failingReader struct {
+	err error
+}
+
+func (r failingReader) Read(_ []byte) (int, error) {
+	return 0, r.err
+}
 
 func saveVars(t *testing.T) func() {
 	t.Helper()
@@ -68,7 +77,7 @@ func TestTextOnlyResponse(t *testing.T) {
 	stubEnv()
 
 	mock := &mockProvider{
-		responses: []string{"The current directory has 3 files."},
+		responses: []string{`{"text":"The current directory has 3 files.","commands":[]}`},
 	}
 
 	input := "what files are here?\nexit\n"
@@ -100,7 +109,7 @@ func TestCommandRunFlow(t *testing.T) {
 	}
 
 	mock := &mockProvider{
-		responses: []string{"Try this:\n```bash\nls -la\n```"},
+		responses: []string{`{"text":"Try this.","commands":["ls -la"]}`},
 	}
 
 	input := "list files\nr\nexit\n"
@@ -133,7 +142,7 @@ func TestCommandSkipFlow(t *testing.T) {
 	}
 
 	mock := &mockProvider{
-		responses: []string{"```bash\nls -la\n```"},
+		responses: []string{`{"text":"Try this.","commands":["ls -la"]}`},
 	}
 
 	input := "list files\ns\nexit\n"
@@ -153,6 +162,40 @@ func TestCommandSkipFlow(t *testing.T) {
 	}
 }
 
+func TestInvalidJSONNoCommandPrompt(t *testing.T) {
+	restore := saveVars(t)
+	defer restore()
+	stubEnv()
+
+	ranCommand := false
+	runCapture = func(command string) (string, int, error) {
+		ranCommand = true
+		return "", 0, nil
+	}
+
+	mock := &mockProvider{
+		responses: []string{"ls -la"},
+	}
+
+	input := "list files\nexit\n"
+	out := &bytes.Buffer{}
+
+	err := Run(mock, strings.NewReader(input), out)
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	if ranCommand {
+		t.Error("command should not run for invalid non-JSON response")
+	}
+	if strings.Contains(out.String(), "[r]un") {
+		t.Errorf("output should not show run prompt for invalid response, got:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "not valid structured output") {
+		t.Errorf("output should contain structured-output warning, got:\n%s", out.String())
+	}
+}
+
 func TestCommandExplainFlow(t *testing.T) {
 	restore := saveVars(t)
 	defer restore()
@@ -160,7 +203,7 @@ func TestCommandExplainFlow(t *testing.T) {
 
 	mock := &mockProvider{
 		responses: []string{
-			"```bash\nfind . -size +100M\n```",
+			`{"text":"Try this.","commands":["find . -size +100M"]}`,
 			"This command searches for files larger than 100MB.",
 		},
 	}
@@ -243,6 +286,30 @@ func TestEOFExits(t *testing.T) {
 	}
 }
 
+func TestInputReadErrorReturns(t *testing.T) {
+	restore := saveVars(t)
+	defer restore()
+	stubEnv()
+
+	mock := &mockProvider{}
+	out := &bytes.Buffer{}
+	readErr := errors.New("input stream failed")
+
+	err := Run(mock, failingReader{err: readErr}, out)
+	if err == nil {
+		t.Fatal("Run() should return read error")
+	}
+	if !errors.Is(err, readErr) {
+		t.Fatalf("Run() error = %v, want %v", err, readErr)
+	}
+	if !strings.Contains(out.String(), "Input error:") {
+		t.Errorf("output should contain input error, got:\n%s", out.String())
+	}
+	if mock.callCount != 0 {
+		t.Error("read error before input should not trigger LLM calls")
+	}
+}
+
 func TestLLMErrorContinues(t *testing.T) {
 	restore := saveVars(t)
 	defer restore()
@@ -279,7 +346,7 @@ func TestDestructiveDoubleConfirm(t *testing.T) {
 	}
 
 	mock := &mockProvider{
-		responses: []string{"```bash\nrm -rf /tmp/old\n```"},
+		responses: []string{`{"text":"Dangerous command.","commands":["rm -rf /tmp/old"]}`},
 	}
 
 	// User chooses run, then declines double confirm
@@ -313,7 +380,7 @@ func TestDestructiveConfirmed(t *testing.T) {
 	}
 
 	mock := &mockProvider{
-		responses: []string{"```bash\nrm -rf /tmp/old\n```"},
+		responses: []string{`{"text":"Dangerous command.","commands":["rm -rf /tmp/old"]}`},
 	}
 
 	// User chooses run, then confirms

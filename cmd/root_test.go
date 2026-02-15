@@ -24,7 +24,7 @@ func (m *mockProvider) Chat(_ context.Context, _ []provider.Message) (string, er
 	return m.chatResult, m.chatErr
 }
 
-func (m *mockProvider) Name() string                     { return "mock" }
+func (m *mockProvider) Name() string                      { return "mock" }
 func (m *mockProvider) Available(_ context.Context) error { return nil }
 
 // saveCmdVars saves the package-level function vars and returns a restore function.
@@ -80,24 +80,42 @@ func TestRunTranslate(t *testing.T) {
 			name:      "safe command, user confirms",
 			args:      []string{"list", "files"},
 			hasConfig: true,
-			mock:      &mockProvider{chatResult: "Here you go:\n```bash\nls -la\n```"},
+			mock:      &mockProvider{chatResult: `{"text":"Here you go.","commands":["ls -la"]}`},
 			input:     "y\n",
 			wantInOut: "ls -la",
 			wantRun:   true,
 		},
 		{
+			name:      "invalid plain text response is fail closed",
+			args:      []string{"list", "files"},
+			hasConfig: true,
+			mock:      &mockProvider{chatResult: "ls -la"},
+			input:     "",
+			wantInOut: "not valid structured output",
+			wantRun:   false,
+		},
+		{
 			name:      "safe command, user declines",
 			args:      []string{"list", "files"},
 			hasConfig: true,
-			mock:      &mockProvider{chatResult: "```bash\nls -la\n```"},
+			mock:      &mockProvider{chatResult: `{"text":"Try this.","commands":["ls -la"]}`},
 			input:     "n\n",
 			wantInOut: "Skipped",
+		},
+		{
+			name:      "invalid fenced response is fail closed",
+			args:      []string{"show", "example"},
+			hasConfig: true,
+			mock:      &mockProvider{chatResult: "```text\nls -la\n```"},
+			input:     "",
+			wantInOut: "not valid structured output",
+			wantRun:   false,
 		},
 		{
 			name:      "destructive command, user confirms",
 			args:      []string{"delete", "files"},
 			hasConfig: true,
-			mock:      &mockProvider{chatResult: "```bash\nrm -rf /tmp/test\n```"},
+			mock:      &mockProvider{chatResult: `{"text":"This will remove files.","commands":["rm -rf /tmp/test"]}`},
 			input:     "y\n",
 			wantInOut: "Warning: this is a destructive command",
 			wantRun:   true,
@@ -106,7 +124,7 @@ func TestRunTranslate(t *testing.T) {
 			name:      "destructive command, user declines",
 			args:      []string{"delete", "files"},
 			hasConfig: true,
-			mock:      &mockProvider{chatResult: "```bash\nrm -rf /tmp/test\n```"},
+			mock:      &mockProvider{chatResult: `{"text":"This will remove files.","commands":["rm -rf /tmp/test"]}`},
 			input:     "n\n",
 			wantInOut: "Skipped",
 		},
@@ -121,7 +139,7 @@ func TestRunTranslate(t *testing.T) {
 			name:      "run command error",
 			args:      []string{"list", "files"},
 			hasConfig: true,
-			mock:      &mockProvider{chatResult: "```bash\nls -la\n```"},
+			mock:      &mockProvider{chatResult: `{"text":"Try this.","commands":["ls -la"]}`},
 			input:     "y\n",
 			runErr:    fmt.Errorf("exit status 1"),
 			wantErr:   "exit status 1",
@@ -131,7 +149,7 @@ func TestRunTranslate(t *testing.T) {
 			name:      "text only response, no commands",
 			args:      []string{"what", "time", "is", "it"},
 			hasConfig: true,
-			mock:      &mockProvider{chatResult: "I can't tell the current time directly."},
+			mock:      &mockProvider{chatResult: `{"text":"I can't tell the current time directly.","commands":[]}`},
 			wantInOut: "I can't tell the current time directly.",
 		},
 	}
@@ -200,7 +218,7 @@ func TestRunTranslateModelFlag(t *testing.T) {
 	var capturedModel string
 	newProvider = func(host, model string) (provider.Provider, error) {
 		capturedModel = model
-		return &mockProvider{chatResult: "```bash\necho test\n```"}, nil
+		return &mockProvider{chatResult: `{"text":"test","commands":["echo test"]}`}, nil
 	}
 	runCommand = func(cmd string) error { return nil }
 	ioIn = strings.NewReader("y\n")

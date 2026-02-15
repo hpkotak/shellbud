@@ -26,8 +26,19 @@ You're on the main branch.
 - **Context-aware**: knows your cwd, git branch, directory contents, OS, and shell
 - **Conversational**: chat mode remembers what you asked and what commands produced
 - **Safe**: destructive commands (`rm`, `sudo`, `dd`) require double confirmation
+- **Fail-closed execution**: commands run only when the model returns valid structured output
 - **Offline**: runs entirely on your machine via Ollama, no cloud API needed
 - **Run / Explain / Skip**: review commands before executing, ask for explanations
+
+## Safety Model
+
+ShellBud asks the model for structured responses:
+
+```json
+{"text":"...","commands":["..."]}
+```
+
+Only commands from valid structured responses are executable. If the model returns malformed or unstructured output, ShellBud still displays it, but does not offer command execution.
 
 ## Install
 

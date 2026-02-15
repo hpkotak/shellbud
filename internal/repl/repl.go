@@ -41,6 +41,10 @@ func Run(p provider.Provider, in io.Reader, out io.Writer) error {
 		_, _ = fmt.Fprint(out, "sb> ")
 
 		if !scanner.Scan() {
+			if err := scanner.Err(); err != nil {
+				_, _ = fmt.Fprintf(out, "\nInput error: %v\n", err)
+				return err
+			}
 			_, _ = fmt.Fprintln(out)
 			break // EOF (Ctrl+D)
 		}
@@ -87,6 +91,9 @@ func Run(p provider.Provider, in io.Reader, out io.Writer) error {
 
 		// Display the full response.
 		_, _ = fmt.Fprintf(out, "\n%s\n", parsed.Text)
+		if !parsed.Structured {
+			_, _ = fmt.Fprintln(out, "  Note: model response was not valid structured output; no commands were run.")
+		}
 
 		// Handle any extracted commands.
 		for _, command := range parsed.Commands {
@@ -118,6 +125,9 @@ func handleCommand(command string, history *[]provider.Message, sysMsg provider.
 	_, _ = fmt.Fprint(out, "  [r]un / [e]xplain / [s]kip: ")
 
 	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			_, _ = fmt.Fprintf(out, "  Input error: %v\n", err)
+		}
 		return
 	}
 	choice := strings.TrimSpace(strings.ToLower(scanner.Text()))
@@ -127,6 +137,9 @@ func handleCommand(command string, history *[]provider.Message, sysMsg provider.
 		if level == safety.Destructive {
 			_, _ = fmt.Fprint(out, "  Are you sure? [y/N]: ")
 			if !scanner.Scan() {
+				if err := scanner.Err(); err != nil {
+					_, _ = fmt.Fprintf(out, "  Input error: %v\n", err)
+				}
 				return
 			}
 			confirm := strings.TrimSpace(strings.ToLower(scanner.Text()))
@@ -172,7 +185,8 @@ func handleCommand(command string, history *[]provider.Message, sysMsg provider.
 		}
 
 		*history = append(*history, provider.Message{Role: "assistant", Content: result})
-		_, _ = fmt.Fprintf(out, "\n%s\n", result)
+		parsed := prompt.ParseChatResponse(result)
+		_, _ = fmt.Fprintf(out, "\n%s\n", parsed.Text)
 
 	case "s", "skip", "":
 		_, _ = fmt.Fprintln(out, "  Skipped.")

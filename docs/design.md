@@ -106,21 +106,31 @@ Individual failures are swallowed — not in a git repo? `GitBranch` is just emp
 
 ### 4. Safety: Regex, Not LLM
 
-Destructive command detection uses 17 compiled regex patterns, not LLM classification.
+Destructive command detection uses compiled regex patterns, not LLM classification.
 
 **Why:** Safety checks must be deterministic, fast, and independent of the LLM. A regex match on `rm`, `sudo`, `dd` etc. is predictable and testable. Trusting the LLM to classify its own output would be circular.
 
 - One-shot mode: safe commands show "Run this? [Y/n]" (default yes), destructive show "Are you sure? [y/N]" (default no)
 - Chat mode: all commands show "[r]un / [e]xplain / [s]kip", destructive commands require an additional "Are you sure? [y/N]" confirmation after choosing run
 
-### 5. Response Parsing
+### 5. Structured Response Parsing (Fail Closed)
 
-The LLM is instructed to use fenced code blocks (` ```bash ... ``` `) for commands. `ParseChatResponse()` extracts commands from code blocks via regex, returning both the full text (for display) and the extracted commands (for the action prompt).
+The LLM is instructed to return only JSON with this schema:
+
+```json
+{"text":"...","commands":["..."]}
+```
+
+`ParseChatResponse()` uses `json.Unmarshal` to validate this contract, then normalizes command strings (trim + drop empties).
+
+Execution safety rule:
+- **Only commands from valid structured JSON are executable.**
+- If output is malformed or unstructured, ShellBud still displays it, but does not offer execution prompts (fail closed).
 
 Responses can be:
-- **Text only** — explanation, answer to a question. Displayed as-is, no action prompt.
-- **Text + commands** — explanation with one or more commands in code blocks. Text displayed, then each command gets run/explain/skip.
-- **Commands only** — just code blocks. Treated same as above.
+- **Valid JSON, no commands** — display `text`, no action prompt.
+- **Valid JSON, commands present** — display `text`, then each command gets run/explain/skip.
+- **Invalid JSON** — raw response displayed, no action prompt.
 
 ### 6. Output Capture (chat mode)
 
@@ -160,7 +170,9 @@ Build messages      [system: ChatSystemPrompt(env), user: query]
 Provider.Chat       Messages → Ollama Chat API → assistant response
     │
     ▼
-ParseChatResponse   Extract commands from code blocks (if any)
+ParseChatResponse   Validate JSON schema, normalize commands
+    │
+    ├─ Invalid JSON → display raw text, done (fail closed)
     │
     ├─ No commands → display text, done
     │
@@ -194,7 +206,9 @@ Provider.Chat          → Ollama Chat API → response
 Add to history         assistant message appended (capped at 50)
     │
     ▼
-ParseChatResponse      Extract commands from code blocks
+ParseChatResponse      Validate JSON schema, normalize commands
+    │
+    ├─ Invalid JSON → display raw text
     │
     ├─ No commands → display text
     │
@@ -204,7 +218,7 @@ ParseChatResponse      Extract commands from code blocks
     [r]un / [e]xplain / [s]kip
         │
         ├─ Run → RunCapture() → output displayed AND added to history
-        ├─ Explain → immediate LLM call → explanation displayed
+        ├─ Explain → immediate LLM call → parsed text displayed
         └─ Skip → continue
     │
     ▼

@@ -18,7 +18,7 @@ golangci-lint run ./...        # Lint (must pass before commit)
 - `cmd/chat.go` — Chat REPL: `sb chat` (conversational with history)
 - `cmd/` — Also: setup, config show/set, version commands
 - `internal/provider/` — LLM provider interface (Message, Chat) + Ollama Chat API implementation
-- `internal/prompt/` — Chat system prompt, response parser (extracts commands from code blocks)
+- `internal/prompt/` — Chat system prompt, structured response parser (JSON contract, fail-closed execution)
 - `internal/shellenv/` — Environment context gathering (cwd, git, dir listing, env vars)
 - `internal/repl/` — Interactive REPL loop (run/explain/skip flow, history, output capture)
 - `internal/safety/` — Destructive command detection (regex-based)
