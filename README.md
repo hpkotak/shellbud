@@ -120,7 +120,7 @@ make validate
 ```
 
 This runs:
-- `gofmt` check (`fmt-check`)
+- `goimports` check (`fmt-check`)
 - `go vet ./...`
 - `go test ./...`
 - `go test -race ./...`
