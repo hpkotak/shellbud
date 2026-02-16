@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: fmt fmt-check test test-race vet lint coverage validate validate-ci hooks
+.PHONY: fmt fmt-check test test-race vet lint coverage validate validate-ci hooks build release-dry-run
 
 fmt:
 	go fmt ./...
@@ -36,3 +36,9 @@ validate-ci: validate
 hooks:
 	git config core.hooksPath .githooks
 	chmod +x .githooks/pre-commit
+
+build:
+	go build -o sb .
+
+release-dry-run:
+	goreleaser release --snapshot --clean

@@ -1,0 +1,46 @@
+version: 2
+
+builds:
+  - binary: sb
+    main: .
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X github.com/hpkotak/shellbud/cmd.version={{ .Version }}
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - formats:
+      - tar.gz
+    name_template: "sb_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
+      - "^ci:"
+
+brews:
+  - repository:
+      owner: hpkotak
+      name: homebrew-tap
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    name: sb
+    homepage: https://github.com/hpkotak/shellbud
+    description: Context-aware shell assistant — interact with your shell in natural language
+    license: MIT
+    install: |
+      bin.install "sb"
+    test: |
+      system bin/"sb", "--version"

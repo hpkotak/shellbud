@@ -47,11 +47,24 @@ Only commands from valid structured responses are executable. If the model retur
 
 ## Install
 
-Requires [Go 1.22+](https://go.dev/dl/) and [Ollama](https://ollama.com).
+### Homebrew (macOS/Linux)
+
+```bash
+brew install hpkotak/tap/sb
+```
+
+### From Source
+
+Requires [Go 1.22+](https://go.dev/dl/).
 
 ```bash
 go install github.com/hpkotak/shellbud@latest
+GOBIN="${GOBIN:-$(go env GOPATH)/bin}" && mv "$GOBIN/shellbud" "$GOBIN/sb"
 ```
+
+### Prerequisites
+
+[Ollama](https://ollama.com) (or another configured provider) must be installed separately.
 
 ## Quick Start
 

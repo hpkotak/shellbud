@@ -50,11 +50,38 @@ These patterns MUST be applied consistently across the entire codebase.
 4. **Constants for defaults** — hardcoded values live in `config.Default()` or package constants, never duplicated across files
 5. **Validate at boundaries** — user-provided config values must be validated before saving
 
+## Distribution
+
+**Locked method: goreleaser + Homebrew tap.** Do not introduce alternative distribution mechanisms.
+
+- `.goreleaser.yml` — builds cross-platform binaries named `sb` (overrides module name `shellbud`)
+- `.github/workflows/release.yml` — triggered by `v*` tags, runs validation then goreleaser
+- Homebrew formula auto-published to `hpkotak/homebrew-tap` via goreleaser
+- Version injected at build time: `-X github.com/hpkotak/shellbud/cmd.version`
+
+### Release Flow
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0   # Triggers release workflow
+```
+
+### Local Testing
+
+```bash
+make build                           # Build sb binary locally
+make release-dry-run                 # goreleaser snapshot (no publish)
+```
+
+### Required GitHub Secrets
+
+- `GITHUB_TOKEN` — automatic in Actions (release assets)
+- `TAP_GITHUB_TOKEN` — PAT with repo scope for `hpkotak/homebrew-tap` pushes
+
 ## Pre-Commit Checklist
 
 1. `go build -o sb .` — compiles
 2. `make validate` — format check + vet + tests + race + lint + coverage
 3. `make hooks` was run at least once locally
-4. No binaries staged (`sb`, `*.exe`, `*.test`)
+4. No binaries staged (`sb`, `shellbud`, `*.exe`, `*.test`)
 5. No secrets staged (`.env`, API keys)
 6. README.md exists and is current
