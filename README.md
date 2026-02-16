@@ -105,6 +105,12 @@ Provider notes:
 
 See [docs/design.md](docs/design.md) for architecture decisions and design rationale.
 
+## Releases
+
+Tagged releases are built automatically via [goreleaser](https://goreleaser.com) and published to [GitHub Releases](https://github.com/hpkotak/shellbud/releases). The Homebrew formula is updated automatically on each release.
+
+For release process details, see [docs/release-policy.md](docs/release-policy.md).
+
 ## Development Validation
 
 Use this before opening a PR or publishing:

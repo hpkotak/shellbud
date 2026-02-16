@@ -5,7 +5,7 @@ Context-aware shell assistant — interact with your shell in natural language. 
 ## Build & Test
 
 ```bash
-go build -o sb .              # Build
+make build                     # Build sb binary locally
 go test ./...                  # Run all tests
 go test -race ./...            # Race detection
 go vet ./...                   # Static analysis
@@ -13,6 +13,7 @@ golangci-lint run ./...        # Lint (must pass before commit)
 make coverage                  # Enforced coverage thresholds
 make validate                  # Full validation pipeline
 make hooks                     # Install local pre-commit hook (runs make validate)
+make release-dry-run           # goreleaser snapshot (no publish)
 ```
 
 ## Project Structure
@@ -75,11 +76,11 @@ make release-dry-run                 # goreleaser snapshot (no publish)
 ### Required GitHub Secrets
 
 - `GITHUB_TOKEN` — automatic in Actions (release assets)
-- `TAP_GITHUB_TOKEN` — PAT with repo scope for `hpkotak/homebrew-tap` pushes
+- `TAP_GITHUB_TOKEN` — fine-grained PAT with Contents read/write on `hpkotak/homebrew-tap`
 
 ## Pre-Commit Checklist
 
-1. `go build -o sb .` — compiles
+1. `make build` — compiles
 2. `make validate` — format check + vet + tests + race + lint + coverage
 3. `make hooks` was run at least once locally
 4. No binaries staged (`sb`, `shellbud`, `*.exe`, `*.test`)

@@ -240,7 +240,7 @@ ParseChatResponse      Validate JSON schema, normalize commands
     [r]un / [e]xplain / [s]kip
         │
         ├─ Run → RunCapture() → output displayed AND added to history
-        ├─ Explain → immediate LLM call → raw response text displayed
+        ├─ Explain → immediate LLM call → parsed text displayed
         └─ Skip → continue
     │
     ▼
@@ -266,3 +266,16 @@ AI-assisted changes are constrained by hard validation gates:
   - `internal/setup >= 70%` temporary floor
 - CI jobs (`format`, `test`, `lint`, `coverage`) run on PRs and pushes to `main`.
 - CODEOWNERS protects high-risk runtime paths with required owner review when branch protection enables it.
+- Release workflow (`.github/workflows/release.yml`) runs the same `make validate` gate before publishing.
+
+## Distribution
+
+Releases are built by [goreleaser](https://goreleaser.com) and distributed via Homebrew:
+
+```bash
+brew install hpkotak/tap/sb
+```
+
+goreleaser overrides the binary name from `shellbud` (the Go module name) to `sb` using the `binary` field in `.goreleaser.yml`. Binaries are built for darwin/linux on amd64/arm64 with version injected via ldflags (`-X github.com/hpkotak/shellbud/cmd.version`).
+
+See [docs/release-policy.md](release-policy.md) for the full release process.
