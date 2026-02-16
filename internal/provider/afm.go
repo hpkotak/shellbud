@@ -86,10 +86,7 @@ func (a *AFMProvider) Chat(ctx context.Context, req ChatRequest) (ChatResponse, 
 		apiMessages[i] = afmMessage(m)
 	}
 
-	model := strings.TrimSpace(req.Model)
-	if model == "" {
-		model = a.model
-	}
+	model := resolveModel(req.Model, a.model)
 
 	reqBody, err := json.Marshal(afmRequest{
 		Model:      model,

@@ -112,10 +112,7 @@ func (o *OpenAIProvider) Chat(ctx context.Context, chatReq ChatRequest) (ChatRes
 		apiMessages[i] = openAIMessage(m)
 	}
 
-	model := strings.TrimSpace(chatReq.Model)
-	if model == "" {
-		model = o.model
-	}
+	model := resolveModel(chatReq.Model, o.model)
 
 	var reqBody openAIChatRequest
 	reqBody.Model = model

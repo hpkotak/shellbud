@@ -63,10 +63,7 @@ func (o *OllamaProvider) Chat(ctx context.Context, req ChatRequest) (ChatRespons
 		apiMessages[i] = api.Message{Role: m.Role, Content: m.Content}
 	}
 
-	model := strings.TrimSpace(req.Model)
-	if model == "" {
-		model = o.model
-	}
+	model := resolveModel(req.Model, o.model)
 
 	stream := false
 	ollamaReq := &api.ChatRequest{
