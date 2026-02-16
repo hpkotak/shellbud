@@ -7,10 +7,9 @@ linters:
     - govet
     - staticcheck
     - unused
-
-issues:
-  exclude-rules:
-    # Allow global vars in cmd/ (cobra pattern requires them)
-    - path: cmd/
-      linters:
-        - gochecknoglobals
+  exclusions:
+    rules:
+      # Allow global vars in cmd/ (cobra pattern requires them)
+      - path: cmd/
+        linters:
+          - gochecknoglobals
