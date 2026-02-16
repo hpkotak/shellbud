@@ -15,15 +15,17 @@ func TestRunChat(t *testing.T) {
 	tests := []struct {
 		name       string
 		hasConfig  bool
+		provider   string
 		modelFlag  string
-		providerFn func(host, model string) (provider.Provider, error)
+		providerFn func(cfg *config.Config, model string) (provider.Provider, error)
 		wantModel  string
+		wantProv   string
 		wantErr    string
 	}{
 		{
 			name:      "no config",
 			hasConfig: false,
-			providerFn: func(host, model string) (provider.Provider, error) {
+			providerFn: func(cfg *config.Config, model string) (provider.Provider, error) {
 				return &mockProvider{}, nil
 			},
 			wantErr: "sb setup",
@@ -31,7 +33,7 @@ func TestRunChat(t *testing.T) {
 		{
 			name:      "provider creation error",
 			hasConfig: true,
-			providerFn: func(host, model string) (provider.Provider, error) {
+			providerFn: func(cfg *config.Config, model string) (provider.Provider, error) {
 				return nil, fmt.Errorf("provider down")
 			},
 			wantErr: "creating provider: provider down",
@@ -39,16 +41,34 @@ func TestRunChat(t *testing.T) {
 		{
 			name:      "uses configured model",
 			hasConfig: true,
-			providerFn: func(host, model string) (provider.Provider, error) {
+			providerFn: func(cfg *config.Config, model string) (provider.Provider, error) {
 				return &mockProvider{}, nil
 			},
 			wantModel: config.DefaultModel,
 		},
 		{
+			name:      "uses configured provider",
+			hasConfig: true,
+			provider:  "openai",
+			providerFn: func(cfg *config.Config, model string) (provider.Provider, error) {
+				return &mockProvider{}, nil
+			},
+			wantProv: "openai",
+		},
+		{
+			name:      "uses afm provider",
+			hasConfig: true,
+			provider:  "afm",
+			providerFn: func(cfg *config.Config, model string) (provider.Provider, error) {
+				return &mockProvider{}, nil
+			},
+			wantProv: "afm",
+		},
+		{
 			name:      "model flag override",
 			hasConfig: true,
 			modelFlag: "codellama:7b",
-			providerFn: func(host, model string) (provider.Provider, error) {
+			providerFn: func(cfg *config.Config, model string) (provider.Provider, error) {
 				return &mockProvider{}, nil
 			},
 			wantModel: "codellama:7b",
@@ -61,15 +81,21 @@ func TestRunChat(t *testing.T) {
 			defer restore()
 
 			if tt.hasConfig {
-				setupTestConfig(t, config.Default())
+				cfg := config.Default()
+				if tt.provider != "" {
+					cfg.Provider = tt.provider
+				}
+				setupTestConfig(t, cfg)
 			} else {
 				t.Setenv("HOME", t.TempDir())
 			}
 
 			var gotModel string
-			newProvider = func(host, model string) (provider.Provider, error) {
+			var gotProvider string
+			newProvider = func(cfg *config.Config, model string) (provider.Provider, error) {
 				gotModel = model
-				return tt.providerFn(host, model)
+				gotProvider = cfg.Provider
+				return tt.providerFn(cfg, model)
 			}
 			modelFlag = tt.modelFlag
 			ioIn = strings.NewReader("exit\n")
@@ -91,6 +117,9 @@ func TestRunChat(t *testing.T) {
 			}
 			if tt.wantModel != "" && gotModel != tt.wantModel {
 				t.Errorf("model = %q, want %q", gotModel, tt.wantModel)
+			}
+			if tt.wantProv != "" && gotProvider != tt.wantProv {
+				t.Errorf("provider = %q, want %q", gotProvider, tt.wantProv)
 			}
 		})
 	}

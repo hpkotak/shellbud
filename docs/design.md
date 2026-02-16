@@ -71,20 +71,40 @@ type Message struct {
     Content string
 }
 
+type ChatRequest struct {
+    Messages   []Message
+    Model      string
+    ExpectJSON bool
+}
+
+type ChatResponse struct {
+    Text         string
+    Raw          string
+    Structured   bool
+    FinishReason string
+    Usage        Usage
+}
+
 type Provider interface {
-    Chat(ctx context.Context, messages []Message) (string, error)
+    Chat(ctx context.Context, req ChatRequest) (ChatResponse, error)
     Name() string
+    Capabilities() Capabilities
     Available(ctx context.Context) error
 }
 ```
 
-`Message` is defined in the `provider` package (not imported from Ollama) so callers stay decoupled from the backend. The Ollama implementation converts `[]provider.Message` to `[]api.Message` internally.
+`Message` is defined in the `provider` package so callers stay decoupled from backend-specific SDK types. Each provider implementation performs its own conversion.
 
-**Why this matters:** Adding a new LLM backend means implementing 3 methods and one type conversion. Nothing else changes.
+**Why this matters:** Adding a new LLM backend means implementing the typed provider contract and wiring one constructor in the provider factory. The CLI code stays unchanged.
 
-### 2. Ollama via Chat API
+### 2. Provider Backends
 
-Conversations use Ollama's `Chat` endpoint (not `Generate`). One-shot mode is simply a single-turn chat. This gives a unified code path for both modes and enables conversation history in chat mode.
+Current backends:
+- `ollama` via Ollama `Chat` API
+- `openai` via Chat Completions API
+- `afm` via external bridge executable (`afm.command`) with stdin/stdout JSON contract
+
+One-shot mode is a single-turn chat for all providers. Chat mode reuses the same provider interface with conversation history.
 
 The system message is rebuilt every turn with fresh environment context (cwd and git state change as commands execute), while conversation history is kept separate and capped at 50 messages.
 
@@ -121,7 +141,7 @@ The LLM is instructed to return only JSON with this schema:
 {"text":"...","commands":["..."]}
 ```
 
-For Ollama, the provider request also sets `format: "json"` so JSON mode is enforced at the API layer in addition to prompt instructions.
+Providers also return normalized metadata (`finish_reason`, usage, structured-output validity) in `ChatResponse`. Parsing safety still remains prompt-parser driven and fail-closed.
 
 `ParseChatResponse()` uses `json.Unmarshal` to validate this contract, then normalizes command strings (trim + drop empties).
 
@@ -169,7 +189,7 @@ Environment         shellenv.Gather() → cwd, git, dir listing, OS, env vars
 Build messages      [system: ChatSystemPrompt(env), user: query]
     │
     ▼
-Provider.Chat       Messages → Ollama Chat API → assistant response
+Provider.Chat       Messages → selected provider backend → assistant response
     │
     ▼
 ParseChatResponse   Validate JSON schema, normalize commands
@@ -202,7 +222,7 @@ Environment refresh    shellenv.Gather() (fresh each turn)
 Build messages         [system: fresh env context] + [history] + [user: input]
     │
     ▼
-Provider.Chat          → Ollama Chat API → response
+Provider.Chat          → selected provider backend → response
     │
     ▼
 Add to history         assistant message appended (capped at 50)

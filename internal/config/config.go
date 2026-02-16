@@ -7,18 +7,21 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
 // Defaults and valid values — single source of truth for the codebase.
 const (
-	DefaultHost     = "http://localhost:11434"
-	DefaultProvider = "ollama"
-	DefaultModel    = "llama3.2:latest"
+	DefaultOllamaHost = "http://localhost:11434"
+	DefaultOpenAIHost = "https://api.openai.com/v1"
+	DefaultAFMCommand = "afm-bridge"
+	DefaultProvider   = "ollama"
+	DefaultModel      = "llama3.2:latest"
 )
 
-var ValidProviders = []string{"ollama"}
+var ValidProviders = []string{"ollama", "openai", "afm"}
 
 var ErrNotFound = errors.New("config file not found")
 
@@ -26,10 +29,20 @@ type Config struct {
 	Provider string `yaml:"provider"`
 	Model    string `yaml:"model"`
 	Ollama   Ollama `yaml:"ollama"`
+	OpenAI   OpenAI `yaml:"openai"`
+	AFM      AFM    `yaml:"afm"`
 }
 
 type Ollama struct {
 	Host string `yaml:"host"`
+}
+
+type OpenAI struct {
+	Host string `yaml:"host"`
+}
+
+type AFM struct {
+	Command string `yaml:"command"`
 }
 
 // Validate checks that config values are valid.
@@ -40,8 +53,19 @@ func (c *Config) Validate() error {
 	if c.Model == "" {
 		return fmt.Errorf("model cannot be empty")
 	}
-	if _, err := url.Parse(c.Ollama.Host); err != nil {
-		return fmt.Errorf("invalid ollama host URL %q: %w", c.Ollama.Host, err)
+	switch c.Provider {
+	case "ollama":
+		if err := validateURL("ollama host", c.Ollama.Host); err != nil {
+			return err
+		}
+	case "openai":
+		if err := validateURL("openai host", c.OpenAI.Host); err != nil {
+			return err
+		}
+	case "afm":
+		if strings.TrimSpace(c.AFM.Command) == "" {
+			return fmt.Errorf("afm command cannot be empty")
+		}
 	}
 	return nil
 }
@@ -53,6 +77,16 @@ func isValidProvider(p string) bool {
 		}
 	}
 	return false
+}
+
+func validateURL(label, raw string) error {
+	if strings.TrimSpace(raw) == "" {
+		return fmt.Errorf("%s URL cannot be empty", label)
+	}
+	if _, err := url.ParseRequestURI(raw); err != nil {
+		return fmt.Errorf("invalid %s URL %q: %w", label, raw, err)
+	}
+	return nil
 }
 
 // Dir returns the config directory path (~/.shellbud).
@@ -124,7 +158,13 @@ func Default() *Config {
 		Provider: DefaultProvider,
 		Model:    DefaultModel,
 		Ollama: Ollama{
-			Host: DefaultHost,
+			Host: DefaultOllamaHost,
+		},
+		OpenAI: OpenAI{
+			Host: DefaultOpenAIHost,
+		},
+		AFM: AFM{
+			Command: DefaultAFMCommand,
 		},
 	}
 }

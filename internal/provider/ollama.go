@@ -31,6 +31,14 @@ func NewOllama(host, model string) (*OllamaProvider, error) {
 
 func (o *OllamaProvider) Name() string { return "ollama" }
 
+func (o *OllamaProvider) Capabilities() Capabilities {
+	return Capabilities{
+		JSONMode:     true,
+		Usage:        true,
+		FinishReason: true,
+	}
+}
+
 // Available checks if Ollama is reachable and the configured model exists.
 func (o *OllamaProvider) Available(ctx context.Context) error {
 	models, err := o.client.List(ctx)
@@ -46,34 +54,55 @@ func (o *OllamaProvider) Available(ctx context.Context) error {
 	return fmt.Errorf("model %q not found in Ollama", o.model)
 }
 
-// Chat sends the conversation to Ollama and returns the assistant's response.
+// Chat sends the conversation to Ollama and returns the assistant response.
 // Converts provider.Message to api.Message internally so callers stay decoupled
 // from the Ollama client library.
-func (o *OllamaProvider) Chat(ctx context.Context, messages []Message) (string, error) {
-	apiMessages := make([]api.Message, len(messages))
-	for i, m := range messages {
+func (o *OllamaProvider) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error) {
+	apiMessages := make([]api.Message, len(req.Messages))
+	for i, m := range req.Messages {
 		apiMessages[i] = api.Message{Role: m.Role, Content: m.Content}
 	}
 
-	stream := false
-	req := &api.ChatRequest{
-		Model:    o.model,
-		Messages: apiMessages,
-		Stream:   &stream,
-		Format:   json.RawMessage(`"json"`),
+	model := strings.TrimSpace(req.Model)
+	if model == "" {
+		model = o.model
 	}
 
-	var result string
-	err := o.client.Chat(ctx, req, func(resp api.ChatResponse) error {
-		result = resp.Message.Content
+	stream := false
+	ollamaReq := &api.ChatRequest{
+		Model:    model,
+		Messages: apiMessages,
+		Stream:   &stream,
+	}
+	if req.ExpectJSON {
+		ollamaReq.Format = json.RawMessage(`"json"`)
+	}
+
+	var finalResp api.ChatResponse
+	err := o.client.Chat(ctx, ollamaReq, func(resp api.ChatResponse) error {
+		finalResp = resp
 		return nil
 	})
 	if err != nil {
-		return "", fmt.Errorf("ollama chat: %w", err)
+		return ChatResponse{}, fmt.Errorf("ollama chat: %w", err)
 	}
 
+	result := finalResp.Message.Content
 	if strings.TrimSpace(result) == "" {
-		return "", fmt.Errorf("empty response from model")
+		return ChatResponse{}, fmt.Errorf("empty response from model")
 	}
-	return result, nil
+
+	usage := Usage{
+		InputTokens:  finalResp.PromptEvalCount,
+		OutputTokens: finalResp.EvalCount,
+	}
+	usage.TotalTokens = usage.InputTokens + usage.OutputTokens
+
+	return ChatResponse{
+		Text:         result,
+		Raw:          result,
+		Structured:   isStructuredJSON(req.ExpectJSON, result),
+		FinishReason: finalResp.DoneReason,
+		Usage:        usage,
+	}, nil
 }

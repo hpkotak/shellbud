@@ -12,13 +12,51 @@ type Message struct {
 	Content string
 }
 
+// ChatRequest represents a normalized LLM request.
+type ChatRequest struct {
+	Messages   []Message
+	Model      string
+	ExpectJSON bool
+}
+
+// Usage represents token usage metadata when available.
+type Usage struct {
+	InputTokens  int
+	OutputTokens int
+	TotalTokens  int
+}
+
+// ChatResponse is a normalized provider response.
+type ChatResponse struct {
+	// Text is the assistant content used for user display and prompt parsing.
+	Text string
+	// Raw is provider-native payload content for debugging/inspection.
+	Raw string
+	// Structured indicates valid JSON content when ExpectJSON is true.
+	Structured bool
+	// FinishReason is provider stop reason, when available.
+	FinishReason string
+	// Usage is token usage metadata, when available.
+	Usage Usage
+}
+
+// Capabilities describes optional provider features.
+type Capabilities struct {
+	JSONMode     bool
+	Usage        bool
+	FinishReason bool
+}
+
 // Provider sends conversations to an LLM backend.
 type Provider interface {
-	// Chat sends the message history and returns the assistant's response.
-	Chat(ctx context.Context, messages []Message) (string, error)
+	// Chat sends the request and returns a normalized provider response.
+	Chat(ctx context.Context, req ChatRequest) (ChatResponse, error)
 
 	// Name returns the provider name (e.g., "ollama").
 	Name() string
+
+	// Capabilities returns feature support for the provider backend.
+	Capabilities() Capabilities
 
 	// Available checks if this provider is ready to use.
 	Available(ctx context.Context) error

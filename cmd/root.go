@@ -22,12 +22,10 @@ var modelFlag string
 // Package-level function variables for testability.
 // Tests override these to avoid real provider/executor calls.
 var (
-	newProvider = func(host, model string) (provider.Provider, error) {
-		return provider.NewOllama(host, model)
-	}
-	runCommand           = executor.Run
-	ioIn       io.Reader = os.Stdin
-	ioOut      io.Writer = os.Stdout
+	newProvider           = createProvider
+	runCommand            = executor.Run
+	ioIn        io.Reader = os.Stdin
+	ioOut       io.Writer = os.Stdout
 )
 
 var rootCmd = &cobra.Command{
@@ -55,6 +53,17 @@ func Execute() error {
 	return rootCmd.Execute()
 }
 
+func createProvider(cfg *config.Config, model string) (provider.Provider, error) {
+	return provider.NewFromConfig(provider.BuildConfig{
+		Name:         cfg.Provider,
+		Model:        model,
+		OllamaHost:   cfg.Ollama.Host,
+		OpenAIHost:   cfg.OpenAI.Host,
+		OpenAIAPIKey: os.Getenv("OPENAI_API_KEY"),
+		AFMCommand:   cfg.AFM.Command,
+	})
+}
+
 func runTranslate(cmd *cobra.Command, args []string) error {
 	if len(args) == 0 {
 		return cmd.Help()
@@ -70,7 +79,7 @@ func runTranslate(cmd *cobra.Command, args []string) error {
 		model = modelFlag
 	}
 
-	p, err := newProvider(cfg.Ollama.Host, model)
+	p, err := newProvider(cfg, model)
 	if err != nil {
 		return fmt.Errorf("creating provider: %w", err)
 	}
@@ -86,12 +95,16 @@ func runTranslate(cmd *cobra.Command, args []string) error {
 		{Role: "user", Content: query},
 	}
 
-	result, err := p.Chat(ctx, messages)
+	resp, err := p.Chat(ctx, provider.ChatRequest{
+		Messages:   messages,
+		Model:      model,
+		ExpectJSON: true,
+	})
 	if err != nil {
 		return fmt.Errorf("query failed: %w", err)
 	}
 
-	parsed := prompt.ParseChatResponse(result)
+	parsed := prompt.ParseChatResponse(resp.Text)
 
 	// Display the full response text.
 	_, _ = fmt.Fprintf(ioOut, "\n%s\n", parsed.Text)

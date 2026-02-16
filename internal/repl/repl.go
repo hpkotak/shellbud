@@ -78,16 +78,16 @@ func Run(p provider.Provider, in io.Reader, out io.Writer) error {
 		messages = append(messages, sysMsg)
 		messages = append(messages, history...)
 
-		result, err := sendMessage(p, messages, out)
+		result, err := sendMessage(p, messages)
 		if err != nil {
 			_, _ = fmt.Fprintf(out, "Error: %v\n\n", err)
 			continue
 		}
 
 		// Add assistant response to history.
-		history = append(history, provider.Message{Role: "assistant", Content: result})
+		history = append(history, provider.Message{Role: "assistant", Content: result.Text})
 
-		parsed := prompt.ParseChatResponse(result)
+		parsed := prompt.ParseChatResponse(result.Text)
 
 		// Display the full response.
 		_, _ = fmt.Fprintf(out, "\n%s\n", parsed.Text)
@@ -106,11 +106,14 @@ func Run(p provider.Provider, in io.Reader, out io.Writer) error {
 	return nil
 }
 
-func sendMessage(p provider.Provider, messages []provider.Message, out io.Writer) (string, error) {
+func sendMessage(p provider.Provider, messages []provider.Message) (provider.ChatResponse, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), chatTimeout)
 	defer cancel()
 
-	return p.Chat(ctx, messages)
+	return p.Chat(ctx, provider.ChatRequest{
+		Messages:   messages,
+		ExpectJSON: true,
+	})
 }
 
 func handleCommand(command string, history *[]provider.Message, sysMsg provider.Message, p provider.Provider, scanner *bufio.Scanner, out io.Writer) {
@@ -178,17 +181,14 @@ func handleCommand(command string, history *[]provider.Message, sysMsg provider.
 		messages = append(messages, sysMsg)
 		messages = append(messages, *history...)
 
-		result, err := sendMessage(p, messages, out)
+		result, err := sendMessage(p, messages)
 		if err != nil {
 			_, _ = fmt.Fprintf(out, "  Explain error: %v\n", err)
 			return
 		}
 
-		*history = append(*history, provider.Message{Role: "assistant", Content: result})
-		explanation := strings.TrimSpace(result)
-		if explanation == "" {
-			explanation = result
-		}
+		*history = append(*history, provider.Message{Role: "assistant", Content: result.Text})
+		explanation := prompt.ParseChatResponse(result.Text).Text
 		_, _ = fmt.Fprintf(out, "\n%s\n", explanation)
 
 	case "s", "skip", "":

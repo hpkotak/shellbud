@@ -33,7 +33,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 		model = modelFlag
 	}
 
-	p, err := newProvider(cfg.Ollama.Host, model)
+	p, err := newProvider(cfg, model)
 	if err != nil {
 		return fmt.Errorf("creating provider: %w", err)
 	}

@@ -48,7 +48,7 @@ func Run(in io.Reader, out io.Writer) error {
 		return err
 	}
 
-	host := config.DefaultHost
+	host := config.DefaultOllamaHost
 	if err := ensureRunning(host, in, out); err != nil {
 		return err
 	}
@@ -67,6 +67,8 @@ func Run(in io.Reader, out io.Writer) error {
 		Provider: config.DefaultProvider,
 		Model:    model,
 		Ollama:   config.Ollama{Host: host},
+		OpenAI:   config.OpenAI{Host: config.DefaultOpenAIHost},
+		AFM:      config.AFM{Command: config.DefaultAFMCommand},
 	}
 	if err := saveConfig(cfg); err != nil {
 		return fmt.Errorf("saving config: %w", err)

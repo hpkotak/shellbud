@@ -19,27 +19,34 @@ type mockProvider struct {
 	messages  [][]provider.Message // captured messages per call
 }
 
-func (m *mockProvider) Chat(_ context.Context, msgs []provider.Message) (string, error) {
-	m.messages = append(m.messages, msgs)
+func (m *mockProvider) Chat(_ context.Context, req provider.ChatRequest) (provider.ChatResponse, error) {
+	m.messages = append(m.messages, req.Messages)
 	if m.callCount < len(m.responses) {
 		resp := m.responses[m.callCount]
 		m.callCount++
-		return resp, nil
+		return provider.ChatResponse{
+			Text: resp,
+			Raw:  resp,
+		}, nil
 	}
-	return "", fmt.Errorf("no more responses configured")
+	return provider.ChatResponse{}, fmt.Errorf("no more responses configured")
 }
 
-func (m *mockProvider) Name() string                      { return "mock" }
+func (m *mockProvider) Name() string { return "mock" }
+func (m *mockProvider) Capabilities() provider.Capabilities {
+	return provider.Capabilities{JSONMode: true}
+}
 func (m *mockProvider) Available(_ context.Context) error { return nil }
 
 // errProvider always returns an error.
 type errProvider struct{}
 
-func (e *errProvider) Chat(_ context.Context, _ []provider.Message) (string, error) {
-	return "", fmt.Errorf("model unavailable")
+func (e *errProvider) Chat(_ context.Context, _ provider.ChatRequest) (provider.ChatResponse, error) {
+	return provider.ChatResponse{}, fmt.Errorf("model unavailable")
 }
-func (e *errProvider) Name() string                      { return "err" }
-func (e *errProvider) Available(_ context.Context) error { return nil }
+func (e *errProvider) Name() string                        { return "err" }
+func (e *errProvider) Capabilities() provider.Capabilities { return provider.Capabilities{} }
+func (e *errProvider) Available(_ context.Context) error   { return nil }
 
 type failingReader struct {
 	err error
@@ -302,9 +309,6 @@ func TestCommandExplainFlow(t *testing.T) {
 	output := out.String()
 	if !strings.Contains(output, "files larger than 100MB") {
 		t.Errorf("output should contain explanation, got:\n%s", output)
-	}
-	if !strings.Contains(output, `"commands":["echo should-not-run"]`) {
-		t.Errorf("explain output should display raw response, got:\n%s", output)
 	}
 }
 

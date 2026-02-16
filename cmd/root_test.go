@@ -20,11 +20,20 @@ type mockProvider struct {
 	chatErr    error
 }
 
-func (m *mockProvider) Chat(_ context.Context, _ []provider.Message) (string, error) {
-	return m.chatResult, m.chatErr
+func (m *mockProvider) Chat(_ context.Context, _ provider.ChatRequest) (provider.ChatResponse, error) {
+	if m.chatErr != nil {
+		return provider.ChatResponse{}, m.chatErr
+	}
+	return provider.ChatResponse{
+		Text: m.chatResult,
+		Raw:  m.chatResult,
+	}, nil
 }
 
-func (m *mockProvider) Name() string                      { return "mock" }
+func (m *mockProvider) Name() string { return "mock" }
+func (m *mockProvider) Capabilities() provider.Capabilities {
+	return provider.Capabilities{JSONMode: true}
+}
 func (m *mockProvider) Available(_ context.Context) error { return nil }
 
 // saveCmdVars saves the package-level function vars and returns a restore function.
@@ -165,7 +174,7 @@ func TestRunTranslate(t *testing.T) {
 				t.Setenv("HOME", t.TempDir()) // no config
 			}
 
-			newProvider = func(host, model string) (provider.Provider, error) {
+			newProvider = func(cfg *config.Config, model string) (provider.Provider, error) {
 				return tt.mock, nil
 			}
 
@@ -216,7 +225,7 @@ func TestRunTranslateModelFlag(t *testing.T) {
 	setupTestConfig(t, config.Default())
 
 	var capturedModel string
-	newProvider = func(host, model string) (provider.Provider, error) {
+	newProvider = func(cfg *config.Config, model string) (provider.Provider, error) {
 		capturedModel = model
 		return &mockProvider{chatResult: `{"text":"test","commands":["echo test"]}`}, nil
 	}
@@ -231,5 +240,109 @@ func TestRunTranslateModelFlag(t *testing.T) {
 	}
 	if capturedModel != "custom-model:latest" {
 		t.Errorf("model = %q, want %q", capturedModel, "custom-model:latest")
+	}
+}
+
+func TestRunTranslatePassesConfiguredProvider(t *testing.T) {
+	restore := saveCmdVars(t)
+	defer restore()
+
+	cfg := config.Default()
+	cfg.Provider = "openai"
+	setupTestConfig(t, cfg)
+
+	var capturedProvider string
+	newProvider = func(cfg *config.Config, model string) (provider.Provider, error) {
+		capturedProvider = cfg.Provider
+		return &mockProvider{chatResult: `{"text":"test","commands":[]}`}, nil
+	}
+	ioIn = strings.NewReader("")
+	ioOut = io.Discard
+
+	if err := runTranslate(rootCmd, []string{"test"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if capturedProvider != "openai" {
+		t.Errorf("provider = %q, want %q", capturedProvider, "openai")
+	}
+}
+
+func TestCreateProvider(t *testing.T) {
+	tests := []struct {
+		name      string
+		cfg       *config.Config
+		envAPIKey string
+		wantName  string
+		wantErr   string
+	}{
+		{
+			name: "ollama provider",
+			cfg: &config.Config{
+				Provider: "ollama",
+				Model:    "llama3.2:latest",
+				Ollama:   config.Ollama{Host: "http://localhost:11434"},
+			},
+			wantName: "ollama",
+		},
+		{
+			name: "openai provider",
+			cfg: &config.Config{
+				Provider: "openai",
+				Model:    "gpt-4o-mini",
+				OpenAI:   config.OpenAI{Host: "https://api.openai.com/v1"},
+			},
+			envAPIKey: "test-key",
+			wantName:  "openai",
+		},
+		{
+			name: "afm provider",
+			cfg: &config.Config{
+				Provider: "afm",
+				Model:    "afm-latest",
+				AFM:      config.AFM{Command: "afm-bridge"},
+			},
+			wantName: "afm",
+		},
+		{
+			name: "openai missing key",
+			cfg: &config.Config{
+				Provider: "openai",
+				Model:    "gpt-4o-mini",
+				OpenAI:   config.OpenAI{Host: "https://api.openai.com/v1"},
+			},
+			wantErr: "OPENAI_API_KEY",
+		},
+		{
+			name: "unsupported provider",
+			cfg: &config.Config{
+				Provider: "unknown",
+				Model:    "model",
+			},
+			wantErr: "unsupported provider",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("OPENAI_API_KEY", tt.envAPIKey)
+
+			got, err := createProvider(tt.cfg, tt.cfg.Model)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("createProvider() unexpected error: %v", err)
+				}
+				if got.Name() != tt.wantName {
+					t.Errorf("provider name = %q, want %q", got.Name(), tt.wantName)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("createProvider() expected error containing %q, got nil", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error = %q, want substring %q", err.Error(), tt.wantErr)
+			}
+		})
 	}
 }

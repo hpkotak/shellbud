@@ -23,11 +23,12 @@ You're on the main branch.
 ## Features
 
 - **Two modes**: one-shot (`sb "query"`) and interactive chat (`sb chat`)
+- **Pluggable providers**: `ollama`, `openai`, or `afm` bridge command
 - **Context-aware**: knows your cwd, git branch, directory contents, OS, and shell
 - **Conversational**: chat mode remembers what you asked and what commands produced
 - **Safe**: destructive commands (`rm`, `sudo`, `dd`) require double confirmation
 - **Fail-closed execution**: commands run only when the model returns valid structured output
-- **Offline**: runs entirely on your machine via Ollama, no cloud API needed
+- **Offline-capable**: use local `ollama` or `afm` bridge when you don't want cloud APIs
 - **Run / Explain / Skip**: review commands before executing, ask for explanations
 
 ## Safety Model
@@ -38,7 +39,7 @@ ShellBud asks the model for structured responses:
 {"text":"...","commands":["..."]}
 ```
 
-For Ollama, ShellBud also sets `format: "json"` in the chat API request to enforce JSON-mode decoding at the provider layer.
+ShellBud enforces JSON mode per provider when available (`ollama`/`openai`) and passes `expect_json` to `afm` bridges. Provider responses are normalized before command parsing.
 
 Only commands from valid structured responses are executable. If the model returns malformed or unstructured output, ShellBud still displays it, but does not offer command execution.
 
@@ -76,9 +77,16 @@ Config lives at `~/.shellbud/config.yaml`.
 
 ```bash
 sb config show                          # View current config
+sb config set provider ollama           # ollama | openai | afm
 sb config set model codellama:7b        # Change default model
 sb config set ollama.host http://host:11434  # Custom Ollama host
+sb config set openai.host https://api.openai.com/v1
+sb config set afm.command /usr/local/bin/afm-bridge
 ```
+
+Provider notes:
+- `openai` reads API key from `OPENAI_API_KEY`.
+- `afm` uses an external executable (`afm.command`) that reads JSON from stdin and returns JSON on stdout: `{"content":"..."}`.
 
 ## Architecture
 

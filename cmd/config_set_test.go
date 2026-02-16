@@ -17,10 +17,16 @@ func TestRunConfigSet(t *testing.T) {
 		wantErr string
 	}{
 		{"set valid provider", "provider", "ollama", ""},
-		{"set invalid provider", "provider", "openai", "invalid provider"},
+		{"set second valid provider", "provider", "openai", ""},
+		{"set third valid provider", "provider", "afm", ""},
+		{"set invalid provider", "provider", "anthropic", "invalid provider"},
 		{"set valid model", "model", "codellama:7b", ""},
 		{"set valid host", "ollama.host", "http://192.168.1.100:11434", ""},
 		{"set invalid host", "ollama.host", "://broken", "invalid URL"},
+		{"set valid openai host", "openai.host", "https://api.openai.com/v1", ""},
+		{"set invalid openai host", "openai.host", "://broken", "invalid URL"},
+		{"set valid afm command", "afm.command", "/usr/local/bin/afm-bridge", ""},
+		{"set invalid afm command", "afm.command", "", "afm command cannot be empty"},
 		{"unknown key", "unknown.key", "value", "unknown config key"},
 	}
 
@@ -68,6 +74,10 @@ func TestRunConfigSet(t *testing.T) {
 				got = loaded.Model
 			case "ollama.host":
 				got = loaded.Ollama.Host
+			case "openai.host":
+				got = loaded.OpenAI.Host
+			case "afm.command":
+				got = loaded.AFM.Command
 			}
 			if got != tt.value {
 				t.Errorf("config[%s] = %q after set, want %q", tt.key, got, tt.value)
@@ -96,5 +106,46 @@ func TestRunConfigSetNoExistingConfig(t *testing.T) {
 	// Should have default provider since we started from Default()
 	if loaded.Provider != config.DefaultProvider {
 		t.Errorf("Provider = %q, want default %q", loaded.Provider, config.DefaultProvider)
+	}
+}
+
+func TestRunConfigSetProviderSetsMissingDefaults(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	// Simulate an old config without openai/afm sections.
+	raw := `provider: ollama
+model: llama3.2:latest
+ollama:
+  host: http://localhost:11434
+`
+	cfgDir := filepath.Join(tmpDir, ".shellbud")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if err := runConfigSet(nil, []string{"provider", "openai"}); err != nil {
+		t.Fatalf("set provider openai: %v", err)
+	}
+	loaded, err := config.Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if loaded.OpenAI.Host != config.DefaultOpenAIHost {
+		t.Errorf("OpenAI.Host = %q, want %q", loaded.OpenAI.Host, config.DefaultOpenAIHost)
+	}
+
+	if err := runConfigSet(nil, []string{"provider", "afm"}); err != nil {
+		t.Fatalf("set provider afm: %v", err)
+	}
+	loaded, err = config.Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if loaded.AFM.Command != config.DefaultAFMCommand {
+		t.Errorf("AFM.Command = %q, want %q", loaded.AFM.Command, config.DefaultAFMCommand)
 	}
 }

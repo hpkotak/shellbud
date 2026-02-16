@@ -149,14 +149,14 @@ func TestRun(t *testing.T) {
 		var gotCfg *config.Config
 		ensureInstalled = func(_ io.Reader, _ io.Writer) error { return nil }
 		ensureRunning = func(host string, _ io.Reader, _ io.Writer) error {
-			if host != config.DefaultHost {
-				t.Fatalf("host = %q, want %q", host, config.DefaultHost)
+			if host != config.DefaultOllamaHost {
+				t.Fatalf("host = %q, want %q", host, config.DefaultOllamaHost)
 			}
 			return nil
 		}
 		newOllamaClient = func(host string) (*api.Client, error) {
-			if host != config.DefaultHost {
-				t.Fatalf("host = %q, want %q", host, config.DefaultHost)
+			if host != config.DefaultOllamaHost {
+				t.Fatalf("host = %q, want %q", host, config.DefaultOllamaHost)
 			}
 			return &api.Client{}, nil
 		}
@@ -184,8 +184,14 @@ func TestRun(t *testing.T) {
 		if gotCfg.Model != "llama3.2:3b" {
 			t.Errorf("model = %q, want %q", gotCfg.Model, "llama3.2:3b")
 		}
-		if gotCfg.Ollama.Host != config.DefaultHost {
-			t.Errorf("host = %q, want %q", gotCfg.Ollama.Host, config.DefaultHost)
+		if gotCfg.Ollama.Host != config.DefaultOllamaHost {
+			t.Errorf("host = %q, want %q", gotCfg.Ollama.Host, config.DefaultOllamaHost)
+		}
+		if gotCfg.OpenAI.Host != config.DefaultOpenAIHost {
+			t.Errorf("openai host = %q, want %q", gotCfg.OpenAI.Host, config.DefaultOpenAIHost)
+		}
+		if gotCfg.AFM.Command != config.DefaultAFMCommand {
+			t.Errorf("afm command = %q, want %q", gotCfg.AFM.Command, config.DefaultAFMCommand)
 		}
 		if !strings.Contains(out.String(), "Config saved to /tmp/test-config.yaml") {
 			t.Errorf("output should mention saved config path, got:\n%s", out.String())

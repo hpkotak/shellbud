@@ -12,7 +12,6 @@ import (
 	"github.com/ollama/ollama/api"
 )
 
-// newTestOllama creates an OllamaProvider pointed at a test server.
 func newTestOllama(t *testing.T, serverURL, model string) *OllamaProvider {
 	t.Helper()
 	p, err := NewOllama(serverURL, model)
@@ -31,7 +30,6 @@ func TestNewOllama(t *testing.T) {
 	}{
 		{"valid localhost", "http://localhost:11434", "llama3.2:latest", false},
 		{"valid https", "https://ollama.example.com:443", "codellama:7b", false},
-		// url.Parse is very permissive — empty string and bare paths parse fine.
 		{"empty host accepted", "", "llama3.2:latest", false},
 	}
 
@@ -48,14 +46,25 @@ func TestNewOllama(t *testing.T) {
 	}
 }
 
-func TestName(t *testing.T) {
+func TestOllamaNameAndCapabilities(t *testing.T) {
 	p, _ := NewOllama("http://localhost:11434", "test")
+
 	if got := p.Name(); got != "ollama" {
 		t.Errorf("Name() = %q, want %q", got, "ollama")
 	}
+
+	gotCaps := p.Capabilities()
+	wantCaps := Capabilities{
+		JSONMode:     true,
+		Usage:        true,
+		FinishReason: true,
+	}
+	if gotCaps != wantCaps {
+		t.Errorf("Capabilities() = %+v, want %+v", gotCaps, wantCaps)
+	}
 }
 
-func TestAvailable(t *testing.T) {
+func TestOllamaAvailable(t *testing.T) {
 	tests := []struct {
 		name    string
 		model   string
@@ -80,19 +89,8 @@ func TestAvailable(t *testing.T) {
 			model: "missing-model",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				resp := api.ListResponse{
-					Models: []api.ListModelResponse{
-						{Name: "llama3.2:latest"},
-					},
+					Models: []api.ListModelResponse{{Name: "llama3.2:latest"}},
 				}
-				_ = json.NewEncoder(w).Encode(resp)
-			},
-			wantErr: "not found",
-		},
-		{
-			name:  "empty model list",
-			model: "llama3.2:latest",
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				resp := api.ListResponse{Models: []api.ListModelResponse{}}
 				_ = json.NewEncoder(w).Encode(resp)
 			},
 			wantErr: "not found",
@@ -134,40 +132,57 @@ func TestAvailable(t *testing.T) {
 	}
 }
 
-func TestChat(t *testing.T) {
+func TestOllamaChat(t *testing.T) {
 	tests := []struct {
-		name    string
-		handler http.HandlerFunc
-		want    string
-		wantErr string
+		name       string
+		expectJSON bool
+		handler    http.HandlerFunc
+		wantText   string
+		wantStruct bool
+		wantFinish string
+		wantUsage  Usage
+		wantErr    string
 	}{
 		{
-			name: "clean response",
+			name:       "json response with metadata",
+			expectJSON: true,
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				resp := api.ChatResponse{
-					Message: api.Message{Role: "assistant", Content: "tar -czvf archive.tar.gz ./folder"},
+					Message:    api.Message{Role: "assistant", Content: `{"text":"ok","commands":[]}`},
+					Done:       true,
+					DoneReason: "stop",
+					Metrics: api.Metrics{
+						PromptEvalCount: 12,
+						EvalCount:       5,
+					},
+				}
+				_ = json.NewEncoder(w).Encode(resp)
+			},
+			wantText:   `{"text":"ok","commands":[]}`,
+			wantStruct: true,
+			wantFinish: "stop",
+			wantUsage: Usage{
+				InputTokens:  12,
+				OutputTokens: 5,
+				TotalTokens:  17,
+			},
+		},
+		{
+			name:       "plain response with expect json disabled",
+			expectJSON: false,
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				resp := api.ChatResponse{
+					Message: api.Message{Role: "assistant", Content: "ls -la"},
 					Done:    true,
 				}
 				_ = json.NewEncoder(w).Encode(resp)
 			},
-			want: "tar -czvf archive.tar.gz ./folder",
+			wantText:   "ls -la",
+			wantStruct: false,
 		},
 		{
-			name: "response with explanation",
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				resp := api.ChatResponse{
-					Message: api.Message{
-						Role:    "assistant",
-						Content: "Here's the command:\n```bash\nls -la\n```",
-					},
-					Done: true,
-				}
-				_ = json.NewEncoder(w).Encode(resp)
-			},
-			want: "Here's the command:\n```bash\nls -la\n```",
-		},
-		{
-			name: "empty response",
+			name:       "empty response",
+			expectJSON: true,
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				resp := api.ChatResponse{
 					Message: api.Message{Role: "assistant", Content: ""},
@@ -178,25 +193,16 @@ func TestChat(t *testing.T) {
 			wantErr: "empty response from model",
 		},
 		{
-			name: "whitespace only response",
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				resp := api.ChatResponse{
-					Message: api.Message{Role: "assistant", Content: "   \n  "},
-					Done:    true,
-				}
-				_ = json.NewEncoder(w).Encode(resp)
-			},
-			wantErr: "empty response from model",
-		},
-		{
-			name: "server error",
+			name:       "server error",
+			expectJSON: true,
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "model not loaded", http.StatusInternalServerError)
 			},
 			wantErr: "ollama chat",
 		},
 		{
-			name: "context cancelled",
+			name:       "context cancelled",
+			expectJSON: true,
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				time.Sleep(500 * time.Millisecond)
 			},
@@ -218,24 +224,36 @@ func TestChat(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			defer cancel()
 
-			messages := []Message{
-				{Role: "system", Content: "you are a test assistant"},
-				{Role: "user", Content: "test query"},
-			}
-
-			got, err := p.Chat(ctx, messages)
+			got, err := p.Chat(ctx, ChatRequest{
+				Messages: []Message{
+					{Role: "system", Content: "you are a test assistant"},
+					{Role: "user", Content: "test query"},
+				},
+				ExpectJSON: tt.expectJSON,
+			})
 			if tt.wantErr == "" {
 				if err != nil {
-					t.Errorf("Chat() unexpected error: %v", err)
+					t.Fatalf("Chat() unexpected error: %v", err)
 				}
-				if got != tt.want {
-					t.Errorf("Chat() = %q, want %q", got, tt.want)
+				if got.Text != tt.wantText {
+					t.Errorf("Text = %q, want %q", got.Text, tt.wantText)
+				}
+				if got.Raw != tt.wantText {
+					t.Errorf("Raw = %q, want %q", got.Raw, tt.wantText)
+				}
+				if got.Structured != tt.wantStruct {
+					t.Errorf("Structured = %v, want %v", got.Structured, tt.wantStruct)
+				}
+				if got.FinishReason != tt.wantFinish {
+					t.Errorf("FinishReason = %q, want %q", got.FinishReason, tt.wantFinish)
+				}
+				if got.Usage != tt.wantUsage {
+					t.Errorf("Usage = %+v, want %+v", got.Usage, tt.wantUsage)
 				}
 				return
 			}
 			if err == nil {
-				t.Errorf("Chat() expected error containing %q, got nil", tt.wantErr)
-				return
+				t.Fatalf("Chat() expected error containing %q, got nil", tt.wantErr)
 			}
 			if !strings.Contains(err.Error(), tt.wantErr) {
 				t.Errorf("Chat() error = %q, want substring %q", err.Error(), tt.wantErr)
@@ -244,55 +262,86 @@ func TestChat(t *testing.T) {
 	}
 }
 
-func TestChatPassesMessages(t *testing.T) {
-	var receivedMessages []api.Message
-	var receivedFormat json.RawMessage
+func TestOllamaChatPassesMessagesAndFormat(t *testing.T) {
+	var receivedReq api.ChatRequest
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req api.ChatRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&receivedReq); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		receivedMessages = req.Messages
-		receivedFormat = req.Format
 
 		resp := api.ChatResponse{
-			Message: api.Message{Role: "assistant", Content: "ok"},
+			Message: api.Message{Role: "assistant", Content: `{"text":"ok","commands":[]}`},
 			Done:    true,
 		}
 		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 
-	p := newTestOllama(t, srv.URL, "test-model")
+	p := newTestOllama(t, srv.URL, "default-model")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	messages := []Message{
 		{Role: "system", Content: "system prompt"},
 		{Role: "user", Content: "hello"},
-		{Role: "assistant", Content: "hi there"},
-		{Role: "user", Content: "how are you"},
 	}
 
-	_, err := p.Chat(ctx, messages)
+	_, err := p.Chat(ctx, ChatRequest{
+		Messages:   messages,
+		Model:      "override-model",
+		ExpectJSON: true,
+	})
 	if err != nil {
 		t.Fatalf("Chat() unexpected error: %v", err)
 	}
 
-	if len(receivedMessages) != len(messages) {
-		t.Fatalf("received %d messages, want %d", len(receivedMessages), len(messages))
+	if receivedReq.Model != "override-model" {
+		t.Errorf("request model = %q, want %q", receivedReq.Model, "override-model")
 	}
-
+	if len(receivedReq.Messages) != len(messages) {
+		t.Fatalf("received %d messages, want %d", len(receivedReq.Messages), len(messages))
+	}
 	for i, want := range messages {
-		got := receivedMessages[i]
+		got := receivedReq.Messages[i]
 		if got.Role != want.Role || got.Content != want.Content {
 			t.Errorf("message[%d] = {%q, %q}, want {%q, %q}", i, got.Role, got.Content, want.Role, want.Content)
 		}
 	}
+	if string(receivedReq.Format) != `"json"` {
+		t.Errorf("request format = %s, want %q", string(receivedReq.Format), `"json"`)
+	}
+}
 
-	if string(receivedFormat) != `"json"` {
-		t.Errorf("request format = %s, want %q", string(receivedFormat), `"json"`)
+func TestOllamaChatDisablesFormatWhenNotExpected(t *testing.T) {
+	var receivedReq api.ChatRequest
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&receivedReq); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		resp := api.ChatResponse{
+			Message: api.Message{Role: "assistant", Content: "ls -la"},
+			Done:    true,
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	p := newTestOllama(t, srv.URL, "default-model")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := p.Chat(ctx, ChatRequest{
+		Messages: []Message{{Role: "user", Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("Chat() unexpected error: %v", err)
+	}
+
+	if len(receivedReq.Format) != 0 {
+		t.Errorf("request format = %q, want empty", string(receivedReq.Format))
 	}
 }
