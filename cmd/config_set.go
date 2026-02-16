@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -31,6 +32,9 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 
 	cfg, err := config.Load()
 	if err != nil {
+		if !errors.Is(err, config.ErrNotFound) {
+			return fmt.Errorf("loading config: %w", err)
+		}
 		cfg = config.Default()
 	}
 
@@ -39,6 +43,7 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 		cfg.Provider = value
 		applyProviderDefaults(cfg)
 	case "model":
+		value = strings.TrimSpace(value)
 		if value == "" {
 			return fmt.Errorf("model cannot be empty")
 		}

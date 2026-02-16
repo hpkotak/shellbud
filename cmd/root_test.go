@@ -53,6 +53,20 @@ func saveCmdVars(t *testing.T) func() {
 	}
 }
 
+// setupMalformedConfig writes invalid YAML to the config path so config.Load() returns a parse error.
+func setupMalformedConfig(t *testing.T) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	cfgDir := filepath.Join(tmpDir, ".shellbud")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(": bad\n\t:"), 0o644); err != nil {
+		t.Fatalf("write malformed config: %v", err)
+	}
+}
+
 // setupTestConfig creates a temp config file and sets HOME so config.Load() works.
 func setupTestConfig(t *testing.T, cfg *config.Config) {
 	t.Helper()
@@ -69,21 +83,29 @@ func setupTestConfig(t *testing.T, cfg *config.Config) {
 
 func TestRunTranslate(t *testing.T) {
 	tests := []struct {
-		name      string
-		args      []string
-		hasConfig bool
-		mock      *mockProvider
-		input     string // user confirmation input
-		runErr    error  // error from runCommand
-		wantErr   string
-		wantInOut string // substring expected in output
-		wantRun   bool   // expect runCommand to be called
+		name            string
+		args            []string
+		hasConfig       bool
+		malformedConfig bool
+		mock            *mockProvider
+		input           string // user confirmation input
+		runErr          error  // error from runCommand
+		wantErr         string
+		wantInOut       string // substring expected in output
+		wantRun         bool   // expect runCommand to be called
 	}{
 		{
 			name:    "no config",
 			args:    []string{"compress", "folder"},
 			mock:    &mockProvider{chatResult: "```bash\ntar -czvf folder.tar.gz folder\n```"},
 			wantErr: "sb setup",
+		},
+		{
+			name:            "malformed config",
+			args:            []string{"list", "files"},
+			malformedConfig: true,
+			mock:            &mockProvider{chatResult: `{"text":"test","commands":[]}`},
+			wantErr:         "parsing config",
 		},
 		{
 			name:      "safe command, user confirms",
@@ -168,9 +190,12 @@ func TestRunTranslate(t *testing.T) {
 			restore := saveCmdVars(t)
 			defer restore()
 
-			if tt.hasConfig {
+			switch {
+			case tt.hasConfig:
 				setupTestConfig(t, config.Default())
-			} else {
+			case tt.malformedConfig:
+				setupMalformedConfig(t)
+			default:
 				t.Setenv("HOME", t.TempDir()) // no config
 			}
 

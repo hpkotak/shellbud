@@ -13,14 +13,15 @@ import (
 
 func TestRunChat(t *testing.T) {
 	tests := []struct {
-		name       string
-		hasConfig  bool
-		provider   string
-		modelFlag  string
-		providerFn func(cfg *config.Config, model string) (provider.Provider, error)
-		wantModel  string
-		wantProv   string
-		wantErr    string
+		name            string
+		hasConfig       bool
+		malformedConfig bool
+		provider        string
+		modelFlag       string
+		providerFn      func(cfg *config.Config, model string) (provider.Provider, error)
+		wantModel       string
+		wantProv        string
+		wantErr         string
 	}{
 		{
 			name:      "no config",
@@ -29,6 +30,14 @@ func TestRunChat(t *testing.T) {
 				return &mockProvider{}, nil
 			},
 			wantErr: "sb setup",
+		},
+		{
+			name:            "malformed config",
+			malformedConfig: true,
+			providerFn: func(cfg *config.Config, model string) (provider.Provider, error) {
+				return &mockProvider{}, nil
+			},
+			wantErr: "parsing config",
 		},
 		{
 			name:      "provider creation error",
@@ -80,13 +89,16 @@ func TestRunChat(t *testing.T) {
 			restore := saveCmdVars(t)
 			defer restore()
 
-			if tt.hasConfig {
+			switch {
+			case tt.hasConfig:
 				cfg := config.Default()
 				if tt.provider != "" {
 					cfg.Provider = tt.provider
 				}
 				setupTestConfig(t, cfg)
-			} else {
+			case tt.malformedConfig:
+				setupMalformedConfig(t)
+			default:
 				t.Setenv("HOME", t.TempDir())
 			}
 

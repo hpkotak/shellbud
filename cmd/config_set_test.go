@@ -21,6 +21,7 @@ func TestRunConfigSet(t *testing.T) {
 		{"set third valid provider", "provider", "afm", ""},
 		{"set invalid provider", "provider", "anthropic", "invalid provider"},
 		{"set valid model", "model", "codellama:7b", ""},
+		{"set empty model after trim", "model", "   ", "model cannot be empty"},
 		{"set valid host", "ollama.host", "http://192.168.1.100:11434", ""},
 		{"set invalid host", "ollama.host", "://broken", "invalid URL"},
 		{"set valid openai host", "openai.host", "https://api.openai.com/v1", ""},
@@ -106,6 +107,44 @@ func TestRunConfigSetNoExistingConfig(t *testing.T) {
 	// Should have default provider since we started from Default()
 	if loaded.Provider != config.DefaultProvider {
 		t.Errorf("Provider = %q, want default %q", loaded.Provider, config.DefaultProvider)
+	}
+}
+
+func TestRunConfigSetMalformedConfig(t *testing.T) {
+	// When config file contains invalid YAML, config set should refuse (not silently reset).
+	setupMalformedConfig(t)
+
+	err := runConfigSet(nil, []string{"model", "codellama:7b"})
+	if err == nil {
+		t.Fatal("expected error for malformed config, got nil")
+	}
+	if !strings.Contains(err.Error(), "parsing config") {
+		t.Errorf("error = %q, want substring %q", err.Error(), "parsing config")
+	}
+}
+
+func TestRunConfigSetModelTrimmed(t *testing.T) {
+	// Whitespace in model values should be trimmed before persisting.
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	cfgDir := filepath.Join(tmpDir, ".shellbud")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := config.Save(config.Default()); err != nil {
+		t.Fatalf("save default config: %v", err)
+	}
+
+	if err := runConfigSet(nil, []string{"model", "  llama3.2:latest  "}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	loaded, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() after set: %v", err)
+	}
+	if loaded.Model != "llama3.2:latest" {
+		t.Errorf("Model = %q, want %q (trimmed)", loaded.Model, "llama3.2:latest")
 	}
 }
 

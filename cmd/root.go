@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -71,7 +72,10 @@ func runTranslate(cmd *cobra.Command, args []string) error {
 
 	cfg, err := config.Load()
 	if err != nil {
-		return fmt.Errorf("no config found. Run 'sb setup' to get started")
+		if errors.Is(err, config.ErrNotFound) {
+			return fmt.Errorf("no config found. Run 'sb setup' to get started")
+		}
+		return fmt.Errorf("loading config: %w", err)
 	}
 
 	model := cfg.Model

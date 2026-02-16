@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/hpkotak/shellbud/internal/config"
@@ -25,7 +26,10 @@ func init() {
 func runChat(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load()
 	if err != nil {
-		return fmt.Errorf("no config found. Run 'sb setup' to get started")
+		if errors.Is(err, config.ErrNotFound) {
+			return fmt.Errorf("no config found. Run 'sb setup' to get started")
+		}
+		return fmt.Errorf("loading config: %w", err)
 	}
 
 	model := cfg.Model
