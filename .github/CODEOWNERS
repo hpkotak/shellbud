@@ -1,0 +1,7 @@
+# High-risk runtime paths require owner review when branch protection
+# enables "Require review from Code Owners".
+/cmd/ @hpkotak
+/internal/repl/ @hpkotak
+/internal/provider/ @hpkotak
+/internal/safety/ @hpkotak
+/internal/prompt/ @hpkotak

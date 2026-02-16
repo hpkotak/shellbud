@@ -51,10 +51,10 @@ func Gather() Snapshot {
 	defer cancel()
 
 	s := Snapshot{
-		OS:   runtime.GOOS,
+		OS:    runtime.GOOS,
 		Shell: platform.Shell(),
-		Arch: runtime.GOARCH,
-		Env:  gatherEnv(),
+		Arch:  runtime.GOARCH,
+		Env:   gatherEnv(),
 	}
 
 	s.CWD, _ = os.Getwd()

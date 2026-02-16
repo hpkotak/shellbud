@@ -38,7 +38,11 @@ ShellBud asks the model for structured responses:
 {"text":"...","commands":["..."]}
 ```
 
+For Ollama, ShellBud also sets `format: "json"` in the chat API request to enforce JSON-mode decoding at the provider layer.
+
 Only commands from valid structured responses are executable. If the model returns malformed or unstructured output, ShellBud still displays it, but does not offer command execution.
+
+`explain` responses in chat mode are displayed as plain assistant text and are never treated as executable command payloads.
 
 ## Install
 
@@ -79,6 +83,39 @@ sb config set ollama.host http://host:11434  # Custom Ollama host
 ## Architecture
 
 See [docs/design.md](docs/design.md) for architecture decisions and design rationale.
+
+## Development Validation
+
+Use this before opening a PR or publishing:
+
+```bash
+make validate
+```
+
+This runs:
+- `gofmt` check (`fmt-check`)
+- `go vet ./...`
+- `go test ./...`
+- `go test -race ./...`
+- `golangci-lint run ./...`
+- coverage gate (`scripts/check_coverage.sh`)
+
+GitHub Actions runs the same validation on every pull request and on pushes to `main`.
+
+Coverage thresholds:
+- Total: `>= 85%`
+- Critical packages (`cmd`, `internal/repl`, `internal/provider`, `internal/safety`, `internal/prompt`): `>= 90%`
+- `internal/setup`: `>= 70%` (temporary floor)
+
+To run the same checks on every local commit:
+
+```bash
+make hooks
+```
+
+This configures Git to use `.githooks/pre-commit`, which runs `make validate`.
+
+For branch protection and risk-based review setup, see [docs/release-policy.md](docs/release-policy.md).
 
 ## License
 

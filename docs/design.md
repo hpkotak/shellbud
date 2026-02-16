@@ -121,6 +121,8 @@ The LLM is instructed to return only JSON with this schema:
 {"text":"...","commands":["..."]}
 ```
 
+For Ollama, the provider request also sets `format: "json"` so JSON mode is enforced at the API layer in addition to prompt instructions.
+
 `ParseChatResponse()` uses `json.Unmarshal` to validate this contract, then normalizes command strings (trim + drop empties).
 
 Execution safety rule:
@@ -218,7 +220,7 @@ ParseChatResponse      Validate JSON schema, normalize commands
     [r]un / [e]xplain / [s]kip
         │
         ├─ Run → RunCapture() → output displayed AND added to history
-        ├─ Explain → immediate LLM call → parsed text displayed
+        ├─ Explain → immediate LLM call → raw response text displayed
         └─ Skip → continue
     │
     ▼
@@ -232,3 +234,15 @@ Loop back to sb> prompt
 | `github.com/spf13/cobra` | CLI framework |
 | `github.com/ollama/ollama/api` | Ollama Chat API client |
 | `gopkg.in/yaml.v3` | Config file parsing |
+
+## Quality Gates
+
+AI-assisted changes are constrained by hard validation gates:
+
+- `make validate` runs format checks, vet, tests, race tests, lint, and coverage checks.
+- Coverage thresholds are enforced by `scripts/check_coverage.sh`:
+  - total `>= 85%`
+  - critical packages `>= 90%` (`cmd`, `internal/repl`, `internal/provider`, `internal/safety`, `internal/prompt`)
+  - `internal/setup >= 70%` temporary floor
+- CI jobs (`format`, `test`, `lint`, `coverage`) run on PRs and pushes to `main`.
+- CODEOWNERS protects high-risk runtime paths with required owner review when branch protection enables it.

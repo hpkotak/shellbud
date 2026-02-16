@@ -3,12 +3,16 @@ package setup
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/hpkotak/shellbud/internal/config"
 	"github.com/ollama/ollama/api"
 )
 
@@ -19,10 +23,26 @@ func saveFuncVars(t *testing.T) func() {
 	origLookPath := lookPath
 	origExecCommand := execCommand
 	origPlatformOS := platformOS
+	origEnsureInstalled := ensureInstalled
+	origEnsureRunning := ensureRunning
+	origNewOllamaClient := newOllamaClient
+	origChooseModel := chooseModel
+	origSaveConfig := saveConfig
+	origConfigPath := configPath
+	origReachabilityCheck := reachabilityCheck
+	origSleep := sleep
 	return func() {
 		lookPath = origLookPath
 		execCommand = origExecCommand
 		platformOS = origPlatformOS
+		ensureInstalled = origEnsureInstalled
+		ensureRunning = origEnsureRunning
+		newOllamaClient = origNewOllamaClient
+		chooseModel = origChooseModel
+		saveConfig = origSaveConfig
+		configPath = origConfigPath
+		reachabilityCheck = origReachabilityCheck
+		sleep = origSleep
 	}
 }
 
@@ -119,6 +139,134 @@ func TestOllamaClient(t *testing.T) {
 			t.Errorf("ollamaClient(\"\") unexpected error: %v", err)
 		}
 	})
+}
+
+func TestRun(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		restore := saveFuncVars(t)
+		defer restore()
+
+		var gotCfg *config.Config
+		ensureInstalled = func(_ io.Reader, _ io.Writer) error { return nil }
+		ensureRunning = func(host string, _ io.Reader, _ io.Writer) error {
+			if host != config.DefaultHost {
+				t.Fatalf("host = %q, want %q", host, config.DefaultHost)
+			}
+			return nil
+		}
+		newOllamaClient = func(host string) (*api.Client, error) {
+			if host != config.DefaultHost {
+				t.Fatalf("host = %q, want %q", host, config.DefaultHost)
+			}
+			return &api.Client{}, nil
+		}
+		chooseModel = func(_ *api.Client, _ io.Reader, _ io.Writer) (string, error) {
+			return "llama3.2:3b", nil
+		}
+		saveConfig = func(cfg *config.Config) error {
+			gotCfg = cfg
+			return nil
+		}
+		configPath = func() string { return "/tmp/test-config.yaml" }
+
+		out := &bytes.Buffer{}
+		err := Run(strings.NewReader(""), out)
+		if err != nil {
+			t.Fatalf("Run() unexpected error: %v", err)
+		}
+
+		if gotCfg == nil {
+			t.Fatal("Run() should save config")
+		}
+		if gotCfg.Provider != config.DefaultProvider {
+			t.Errorf("provider = %q, want %q", gotCfg.Provider, config.DefaultProvider)
+		}
+		if gotCfg.Model != "llama3.2:3b" {
+			t.Errorf("model = %q, want %q", gotCfg.Model, "llama3.2:3b")
+		}
+		if gotCfg.Ollama.Host != config.DefaultHost {
+			t.Errorf("host = %q, want %q", gotCfg.Ollama.Host, config.DefaultHost)
+		}
+		if !strings.Contains(out.String(), "Config saved to /tmp/test-config.yaml") {
+			t.Errorf("output should mention saved config path, got:\n%s", out.String())
+		}
+	})
+
+	tests := []struct {
+		name    string
+		setFail func()
+		wantErr string
+	}{
+		{
+			name: "ensure installed fails",
+			setFail: func() {
+				ensureInstalled = func(_ io.Reader, _ io.Writer) error {
+					return errors.New("install failed")
+				}
+			},
+			wantErr: "install failed",
+		},
+		{
+			name: "ensure running fails",
+			setFail: func() {
+				ensureRunning = func(string, io.Reader, io.Writer) error {
+					return errors.New("not running")
+				}
+			},
+			wantErr: "not running",
+		},
+		{
+			name: "client creation fails",
+			setFail: func() {
+				newOllamaClient = func(string) (*api.Client, error) {
+					return nil, errors.New("bad host")
+				}
+			},
+			wantErr: "bad host",
+		},
+		{
+			name: "model selection fails",
+			setFail: func() {
+				chooseModel = func(*api.Client, io.Reader, io.Writer) (string, error) {
+					return "", errors.New("no model selected")
+				}
+			},
+			wantErr: "no model selected",
+		},
+		{
+			name: "save config fails",
+			setFail: func() {
+				saveConfig = func(*config.Config) error {
+					return errors.New("disk full")
+				}
+			},
+			wantErr: "saving config: disk full",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			restore := saveFuncVars(t)
+			defer restore()
+
+			ensureInstalled = func(_ io.Reader, _ io.Writer) error { return nil }
+			ensureRunning = func(string, io.Reader, io.Writer) error { return nil }
+			newOllamaClient = func(string) (*api.Client, error) { return &api.Client{}, nil }
+			chooseModel = func(*api.Client, io.Reader, io.Writer) (string, error) { return "llama3.2:3b", nil }
+			saveConfig = func(*config.Config) error { return nil }
+			configPath = func() string { return "/tmp/test-config.yaml" }
+
+			tt.setFail()
+
+			err := Run(strings.NewReader(""), &bytes.Buffer{})
+			if err == nil {
+				t.Fatalf("Run() expected error containing %q, got nil", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error = %q, want substring %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
 }
 
 func TestSelectModel(t *testing.T) {
@@ -247,6 +395,7 @@ func TestEnsureOllamaInstalled(t *testing.T) {
 		found     bool   // whether ollama is in PATH
 		os        string // mock platform OS
 		input     string // user input for confirmation
+		installOK bool
 		wantErr   string
 		wantInOut string // substring expected in output
 	}{
@@ -269,6 +418,30 @@ func TestEnsureOllamaInstalled(t *testing.T) {
 			input:   "n\n",
 			wantErr: "ollama is required",
 		},
+		{
+			name:      "not installed, darwin, install succeeds",
+			found:     false,
+			os:        "darwin",
+			input:     "y\n",
+			installOK: true,
+			wantInOut: "[ok] Ollama installed",
+		},
+		{
+			name:      "not installed, darwin, install fails",
+			found:     false,
+			os:        "darwin",
+			input:     "y\n",
+			installOK: false,
+			wantErr:   "failed to install ollama",
+		},
+		{
+			name:      "not installed, linux, install succeeds",
+			found:     false,
+			os:        "linux",
+			input:     "y\n",
+			installOK: true,
+			wantInOut: "[ok] Ollama installed",
+		},
 	}
 
 	for _, tt := range tests {
@@ -286,6 +459,14 @@ func TestEnsureOllamaInstalled(t *testing.T) {
 				}
 			}
 			platformOS = func() string { return tt.os }
+			if !tt.found && (tt.os == "darwin" || tt.os == "linux") {
+				execCommand = func(_ string, _ ...string) *exec.Cmd {
+					if tt.installOK {
+						return exec.Command("sh", "-c", "exit 0")
+					}
+					return exec.Command("sh", "-c", "exit 1")
+				}
+			}
 
 			in := strings.NewReader(tt.input)
 			out := &bytes.Buffer{}
@@ -312,6 +493,9 @@ func TestEnsureOllamaInstalled(t *testing.T) {
 
 func TestEnsureOllamaRunning(t *testing.T) {
 	t.Run("already reachable", func(t *testing.T) {
+		restore := saveFuncVars(t)
+		defer restore()
+
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}))
@@ -328,6 +512,9 @@ func TestEnsureOllamaRunning(t *testing.T) {
 	})
 
 	t.Run("not reachable, user declines", func(t *testing.T) {
+		restore := saveFuncVars(t)
+		defer restore()
+
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}))
@@ -340,6 +527,69 @@ func TestEnsureOllamaRunning(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "ollama must be running") {
 			t.Errorf("error = %q, want substring %q", err.Error(), "ollama must be running")
+		}
+	})
+
+	t.Run("start command fails", func(t *testing.T) {
+		restore := saveFuncVars(t)
+		defer restore()
+
+		reachabilityCheck = func(string) bool { return false }
+		execCommand = func(_ string, _ ...string) *exec.Cmd {
+			return exec.Command("definitely-not-a-command")
+		}
+
+		out := &bytes.Buffer{}
+		err := ensureOllamaRunning("http://localhost:11434", strings.NewReader("y\n"), out)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "failed to start ollama") {
+			t.Errorf("error = %q, want substring %q", err.Error(), "failed to start ollama")
+		}
+	})
+
+	t.Run("starts and becomes reachable", func(t *testing.T) {
+		restore := saveFuncVars(t)
+		defer restore()
+
+		calls := 0
+		reachabilityCheck = func(string) bool {
+			calls++
+			return calls >= 3
+		}
+		sleep = func(time.Duration) {}
+		execCommand = func(_ string, _ ...string) *exec.Cmd {
+			return exec.Command("sh", "-c", "exit 0")
+		}
+
+		out := &bytes.Buffer{}
+		err := ensureOllamaRunning("http://localhost:11434", strings.NewReader("y\n"), out)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(out.String(), "[ok] Ollama is running") {
+			t.Errorf("output = %q, want substring %q", out.String(), "[ok] Ollama is running")
+		}
+	})
+
+	t.Run("times out if still unreachable", func(t *testing.T) {
+		restore := saveFuncVars(t)
+		defer restore()
+
+		reachabilityCheck = func(string) bool { return false }
+		sleep = func(time.Duration) {}
+		execCommand = func(_ string, _ ...string) *exec.Cmd {
+			return exec.Command("sh", "-c", "exit 0")
+		}
+
+		out := &bytes.Buffer{}
+		err := ensureOllamaRunning("http://localhost:11434", strings.NewReader("y\n"), out)
+		if err == nil {
+			t.Fatal("expected timeout error, got nil")
+		}
+		if !strings.Contains(err.Error(), "did not start within 10 seconds") {
+			t.Errorf("error = %q, want timeout message", err.Error())
 		}
 	})
 }

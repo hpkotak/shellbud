@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -59,6 +60,7 @@ func (o *OllamaProvider) Chat(ctx context.Context, messages []Message) (string, 
 		Model:    o.model,
 		Messages: apiMessages,
 		Stream:   &stream,
+		Format:   json.RawMessage(`"json"`),
 	}
 
 	var result string

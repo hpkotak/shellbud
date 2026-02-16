@@ -28,10 +28,10 @@ func TestGather(t *testing.T) {
 	defer func() { execCommandFn = origExec }()
 
 	execCommandFn = mockExec(map[string]string{
-		"ls -la":            "total 8\ndrwxr-xr-x  3 user staff  96 Jan  1 00:00 .\n-rw-r--r--  1 user staff 100 Jan  1 00:00 main.go\n",
-		"git rev-parse":     "main\n",
-		"git status":        " M main.go\n",
-		"git log":           "abc1234 feat: initial commit\ndef5678 fix: something\n",
+		"ls -la":        "total 8\ndrwxr-xr-x  3 user staff  96 Jan  1 00:00 .\n-rw-r--r--  1 user staff 100 Jan  1 00:00 main.go\n",
+		"git rev-parse": "main\n",
+		"git status":    " M main.go\n",
+		"git log":       "abc1234 feat: initial commit\ndef5678 fix: something\n",
 	})
 
 	snap := Gather()

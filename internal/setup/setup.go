@@ -24,9 +24,17 @@ import (
 // Package-level function variables for testability.
 // Tests override these to avoid real exec/network calls.
 var (
-	lookPath    = exec.LookPath
-	execCommand = exec.Command
-	platformOS  = platform.OS
+	lookPath          = exec.LookPath
+	execCommand       = exec.Command
+	platformOS        = platform.OS
+	ensureInstalled   = ensureOllamaInstalled
+	ensureRunning     = ensureOllamaRunning
+	newOllamaClient   = ollamaClient
+	chooseModel       = selectModel
+	saveConfig        = config.Save
+	configPath        = config.Path
+	reachabilityCheck = isOllamaReachable
+	sleep             = time.Sleep
 )
 
 // Run executes the interactive setup flow.
@@ -36,21 +44,21 @@ func Run(in io.Reader, out io.Writer) error {
 	_, _ = fmt.Fprintln(out, "==============")
 	_, _ = fmt.Fprintf(out, "Platform: %s\n\n", platformOS())
 
-	if err := ensureOllamaInstalled(in, out); err != nil {
+	if err := ensureInstalled(in, out); err != nil {
 		return err
 	}
 
 	host := config.DefaultHost
-	if err := ensureOllamaRunning(host, in, out); err != nil {
+	if err := ensureRunning(host, in, out); err != nil {
 		return err
 	}
 
-	client, err := ollamaClient(host)
+	client, err := newOllamaClient(host)
 	if err != nil {
 		return err
 	}
 
-	model, err := selectModel(client, in, out)
+	model, err := chooseModel(client, in, out)
 	if err != nil {
 		return err
 	}
@@ -60,11 +68,11 @@ func Run(in io.Reader, out io.Writer) error {
 		Model:    model,
 		Ollama:   config.Ollama{Host: host},
 	}
-	if err := config.Save(cfg); err != nil {
+	if err := saveConfig(cfg); err != nil {
 		return fmt.Errorf("saving config: %w", err)
 	}
 
-	_, _ = fmt.Fprintf(out, "\nConfig saved to %s\n", config.Path())
+	_, _ = fmt.Fprintf(out, "\nConfig saved to %s\n", configPath())
 	_, _ = fmt.Fprintln(out, "Ready! Try: sb compress this folder as tar.gz")
 	return nil
 }
@@ -109,7 +117,7 @@ func ensureOllamaInstalled(in io.Reader, out io.Writer) error {
 }
 
 func ensureOllamaRunning(host string, in io.Reader, out io.Writer) error {
-	if isOllamaReachable(host) {
+	if reachabilityCheck(host) {
 		_, _ = fmt.Fprintln(out, "[ok] Ollama is running")
 		return nil
 	}
@@ -130,8 +138,8 @@ func ensureOllamaRunning(host string, in io.Reader, out io.Writer) error {
 	}
 
 	for i := 0; i < 10; i++ {
-		time.Sleep(time.Second)
-		if isOllamaReachable(host) {
+		sleep(time.Second)
+		if reachabilityCheck(host) {
 			_, _ = fmt.Fprintln(out, "[ok] Ollama is running")
 			return nil
 		}

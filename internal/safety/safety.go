@@ -38,7 +38,7 @@ var destructiveRaw = []string{
 	`\bsystemctl\s+(stop|disable|mask)\b`,
 	`\bmv\s+/`,
 	`\bchown\s+-R\b`,
-	`:\s*>\s*\S`,  // truncate via : > file
+	`:\s*>\s*\S`, // truncate via : > file
 	`\btruncate\b`,
 	`\bshred\b`,
 }

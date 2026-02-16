@@ -246,6 +246,7 @@ func TestChat(t *testing.T) {
 
 func TestChatPassesMessages(t *testing.T) {
 	var receivedMessages []api.Message
+	var receivedFormat json.RawMessage
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req api.ChatRequest
@@ -254,6 +255,7 @@ func TestChatPassesMessages(t *testing.T) {
 			return
 		}
 		receivedMessages = req.Messages
+		receivedFormat = req.Format
 
 		resp := api.ChatResponse{
 			Message: api.Message{Role: "assistant", Content: "ok"},
@@ -288,5 +290,9 @@ func TestChatPassesMessages(t *testing.T) {
 		if got.Role != want.Role || got.Content != want.Content {
 			t.Errorf("message[%d] = {%q, %q}, want {%q, %q}", i, got.Role, got.Content, want.Role, want.Content)
 		}
+	}
+
+	if string(receivedFormat) != `"json"` {
+		t.Errorf("request format = %s, want %q", string(receivedFormat), `"json"`)
 	}
 }

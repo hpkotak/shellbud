@@ -185,8 +185,11 @@ func handleCommand(command string, history *[]provider.Message, sysMsg provider.
 		}
 
 		*history = append(*history, provider.Message{Role: "assistant", Content: result})
-		parsed := prompt.ParseChatResponse(result)
-		_, _ = fmt.Fprintf(out, "\n%s\n", parsed.Text)
+		explanation := strings.TrimSpace(result)
+		if explanation == "" {
+			explanation = result
+		}
+		_, _ = fmt.Fprintf(out, "\n%s\n", explanation)
 
 	case "s", "skip", "":
 		_, _ = fmt.Fprintln(out, "  Skipped.")

@@ -7,8 +7,12 @@ Context-aware shell assistant — interact with your shell in natural language. 
 ```bash
 go build -o sb .              # Build
 go test ./...                  # Run all tests
+go test -race ./...            # Race detection
 go vet ./...                   # Static analysis
 golangci-lint run ./...        # Lint (must pass before commit)
+make coverage                  # Enforced coverage thresholds
+make validate                  # Full validation pipeline
+make hooks                     # Install local pre-commit hook (runs make validate)
 ```
 
 ## Project Structure
@@ -49,9 +53,8 @@ These patterns MUST be applied consistently across the entire codebase.
 ## Pre-Commit Checklist
 
 1. `go build -o sb .` — compiles
-2. `go vet ./...` — no issues
-3. `go test ./...` — all pass
-4. `golangci-lint run ./...` — 0 issues
-5. No binaries staged (`sb`, `*.exe`, `*.test`)
-6. No secrets staged (`.env`, API keys)
-7. README.md exists and is current
+2. `make validate` — format check + vet + tests + race + lint + coverage
+3. `make hooks` was run at least once locally
+4. No binaries staged (`sb`, `*.exe`, `*.test`)
+5. No secrets staged (`.env`, API keys)
+6. README.md exists and is current

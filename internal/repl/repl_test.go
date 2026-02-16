@@ -162,6 +162,85 @@ func TestCommandSkipFlow(t *testing.T) {
 	}
 }
 
+func TestCommandRunExecutionError(t *testing.T) {
+	restore := saveVars(t)
+	defer restore()
+	stubEnv()
+
+	runCapture = func(command string) (string, int, error) {
+		return "", 1, fmt.Errorf("boom")
+	}
+
+	mock := &mockProvider{
+		responses: []string{`{"text":"Try this.","commands":["ls -la"]}`},
+	}
+
+	input := "list files\nr\nexit\n"
+	out := &bytes.Buffer{}
+
+	err := Run(mock, strings.NewReader(input), out)
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "Execution error: boom") {
+		t.Errorf("output should contain execution error, got:\n%s", out.String())
+	}
+}
+
+func TestCommandExplainError(t *testing.T) {
+	restore := saveVars(t)
+	defer restore()
+	stubEnv()
+
+	mock := &mockProvider{
+		responses: []string{`{"text":"Try this.","commands":["ls -la"]}`},
+	}
+
+	input := "list files\ne\nexit\n"
+	out := &bytes.Buffer{}
+
+	err := Run(mock, strings.NewReader(input), out)
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "Explain error:") {
+		t.Errorf("output should contain explain error, got:\n%s", out.String())
+	}
+}
+
+func TestCommandInvalidChoiceDefaultsSkip(t *testing.T) {
+	restore := saveVars(t)
+	defer restore()
+	stubEnv()
+
+	ranCommand := false
+	runCapture = func(command string) (string, int, error) {
+		ranCommand = true
+		return "", 0, nil
+	}
+
+	mock := &mockProvider{
+		responses: []string{`{"text":"Try this.","commands":["ls -la"]}`},
+	}
+
+	input := "list files\nx\nexit\n"
+	out := &bytes.Buffer{}
+
+	err := Run(mock, strings.NewReader(input), out)
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	if ranCommand {
+		t.Error("command should not run for invalid choice")
+	}
+	if !strings.Contains(out.String(), "Skipped.") {
+		t.Errorf("output should contain skipped message, got:\n%s", out.String())
+	}
+}
+
 func TestInvalidJSONNoCommandPrompt(t *testing.T) {
 	restore := saveVars(t)
 	defer restore()
@@ -204,7 +283,7 @@ func TestCommandExplainFlow(t *testing.T) {
 	mock := &mockProvider{
 		responses: []string{
 			`{"text":"Try this.","commands":["find . -size +100M"]}`,
-			"This command searches for files larger than 100MB.",
+			`{"text":"This command searches for files larger than 100MB.","commands":["echo should-not-run"]}`,
 		},
 	}
 
@@ -223,6 +302,9 @@ func TestCommandExplainFlow(t *testing.T) {
 	output := out.String()
 	if !strings.Contains(output, "files larger than 100MB") {
 		t.Errorf("output should contain explanation, got:\n%s", output)
+	}
+	if !strings.Contains(output, `"commands":["echo should-not-run"]`) {
+		t.Errorf("explain output should display raw response, got:\n%s", output)
 	}
 }
 
