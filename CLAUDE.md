@@ -21,19 +21,46 @@ make install-bridge            # Build + install afm-bridge to ~/.shellbud/bin/
 ## Project Structure
 
 - `main.go` — Entry point, delegates to `cmd.Execute()`
-- `cmd/root.go` — One-shot mode: `sb "query"` (enriched with environment context)
-- `cmd/chat.go` — Chat REPL: `sb chat` (conversational with history)
-- `cmd/` — Also: setup, config show/set, version commands
-- `internal/provider/` — LLM provider interface (Message, Chat) + Ollama Chat API implementation
-- `internal/prompt/` — Chat system prompt, structured response parser (JSON contract, fail-closed execution)
-- `internal/shellenv/` — Environment context gathering (cwd, git, dir listing, env vars)
-- `internal/repl/` — Interactive REPL loop (run/explain/skip flow, history, output capture)
-- `internal/safety/` — Destructive command detection (regex-based)
-- `internal/executor/` — Command confirmation, execution, and output capture (Run + RunCapture)
+- `cmd/` — Cobra command tree: root (one-shot), `chat`, `setup`, `config show`, `config set`, `version`
+  - `Execute()` is the entry point; `--model` flag overrides config model for any command
+  - One-shot (`sb "query"`) gathers env context, sends single LLM request, offers run/skip per command
+- `internal/provider/` — LLM provider interface + Ollama/OpenAI/AFM implementations
+  - `Provider` interface: `Chat(ctx, ChatRequest) (ChatResponse, error)`, `Name() string`, `Capabilities() Capabilities`, `Available(ctx) error`
+  - `Message{Role, Content}`, `ChatRequest{Messages, Model, ExpectJSON}`, `ChatResponse{Text, Raw, Structured, FinishReason, Usage, Warning}`
+  - `Capabilities{JSONMode, Usage, FinishReason}`, `Usage{InputTokens, OutputTokens, TotalTokens}`
+  - `BuildConfig{Name, Model, OllamaHost, OpenAIHost, OpenAIAPIKey, AFMCommand}` → `NewFromConfig(BuildConfig) (Provider, error)`
 - `internal/config/` — Config file management (~/.shellbud/config.yaml)
-- `internal/setup/` — First-run interactive setup flow
+  - `Config{Provider, Model, Ollama{Host}, OpenAI{Host}, AFM{Command}}` — yaml-tagged
+  - `Load() (*Config, error)`, `Save(*Config) error`, `Default() *Config`, `Validate() error`
+  - `ErrNotFound` — returned when config file doesn't exist (distinct from parse errors)
+  - `ValidProviders = ["ollama", "openai", "afm"]`; defaults: `DefaultProvider`, `DefaultModel`, `DefaultOllamaHost`, etc.
+- `internal/prompt/` — System prompt + structured response parser (JSON contract, fail-closed)
+  - `ChatSystemPrompt(envContext string) string` — builds system prompt with env snapshot
+  - `ParseChatResponse(raw string) ParsedResponse` — extracts commands only from valid JSON
+  - `ParsedResponse{Text, Commands []string, Structured bool}` — Structured=false → no commands offered
+  - JSON contract: `{"text":"...","commands":["..."]}` — fail-closed: invalid JSON = display-only
+- `internal/shellenv/` — Environment context gathering (best-effort, errors swallowed)
+  - `Snapshot{CWD, DirList, OS, Shell, Arch, GitBranch, GitDirty, GitRecent, Env map[string]string}`
+  - `Gather() Snapshot`, `(Snapshot).Format() string` — Format renders for system prompt embedding
+- `internal/safety/` — Deterministic destructive command detection (regex, not LLM)
+  - `Level` type: `Safe`, `Destructive` (iota constants)
+  - `Classify(command string) Level` — regex patterns for rm, sudo, dd, mkfs, etc.
+- `internal/executor/` — Command confirmation and execution
+  - `Confirm(prompt string, defaultYes bool, in io.Reader, out io.Writer) bool`
+  - `Run(command string) error` — inherits stdin/stdout/stderr
+  - `RunCapture(command string) (output string, exitCode int, err error)` — tees output, truncates at `MaxOutputBytes`
+- `internal/repl/` — Interactive chat loop (run/explain/skip flow, history, output capture)
+  - `Run(p provider.Provider, in io.Reader, out io.Writer) error`
+  - Refreshes env context each turn, maintains conversation history (capped at 50 messages)
+- `internal/setup/` — First-run interactive setup (provider detection, model selection)
+  - `Run(in io.Reader, out io.Writer) error`
+  - On darwin: bridge lookup → `--check-availability` JSON probe → offer AFM or Ollama
 - `internal/platform/` — OS/shell detection
-- `bridge/afm/` — Swift CLI that calls Apple Foundation Models (macOS 26+, Apple Silicon)
+- `bridge/afm/` — Swift CLI bridging to Apple Foundation Models (macOS 26+, Apple Silicon)
+  - Two targets: `AFMBridgeCore` (testable, no FoundationModels dep) + `afm-bridge` (executable)
+  - stdin/stdout JSON contract — Go sends `BridgeRequest{model, messages[], expect_json}`
+  - Bridge responds `BridgeResponse{content, finish_reason?, usage?, context_trimmed?}`
+  - `--check-availability` mode → `AvailabilityResponse{available, reason?}`
 
 ## Conventions
 
