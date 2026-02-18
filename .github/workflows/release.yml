@@ -82,7 +82,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: afm-bridge-darwin-arm64
-          path: dist/extra/
+          path: extra/
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6

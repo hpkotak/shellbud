@@ -25,7 +25,7 @@ checksum:
 
 release:
   extra_files:
-    - glob: dist/extra/afm-bridge_*.tar.gz
+    - glob: extra/afm-bridge_*.tar.gz
 
 changelog:
   sort: asc

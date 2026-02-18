@@ -31,6 +31,7 @@ shellbud
 
 # GoReleaser output
 dist/
+extra/
 
 # Swift bridge build artifacts
 bridge/afm/.build/
