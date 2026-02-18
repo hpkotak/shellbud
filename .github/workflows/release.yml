@@ -84,6 +84,25 @@ jobs:
           name: afm-bridge-darwin-arm64
           path: extra/
 
+      - name: Verify bridge artifact
+        env:
+          BRIDGE_SHA256: ${{ needs.build-bridge.outputs.bridge_sha256 }}
+        run: |
+          TARBALL=$(ls extra/afm-bridge_*.tar.gz)
+          echo "Found: ${TARBALL}"
+
+          # Must contain afm-bridge binary
+          tar -tzf "${TARBALL}" | grep -q '^afm-bridge$'
+          echo "Contents: valid"
+
+          # SHA256 must match build-bridge output
+          ACTUAL=$(shasum -a 256 "${TARBALL}" | awk '{print $1}')
+          if [ "${ACTUAL}" != "${BRIDGE_SHA256}" ]; then
+            echo "::error::SHA256 mismatch: expected ${BRIDGE_SHA256}, got ${ACTUAL}"
+            exit 1
+          fi
+          echo "SHA256: ${ACTUAL} (verified)"
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
