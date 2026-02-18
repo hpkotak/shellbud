@@ -1,5 +1,9 @@
 // Package provider defines the LLM backend interface and implementations.
 // New backends (Apple FM, Claude API) implement the Provider interface.
+//
+// Provider is deliberately thin (no streaming, no embeddings) — ShellBud only
+// needs single-turn chat. All backend-specific types stay in implementation
+// files, never leak through the interface.
 package provider
 
 import "context"

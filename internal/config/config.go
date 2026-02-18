@@ -1,4 +1,8 @@
 // Package config manages the shellbud configuration file at ~/.shellbud/config.yaml.
+//
+// Config is flat YAML by design — no nesting beyond one level, no environment
+// variable overrides, no viper. Simplicity > flexibility for a CLI tool with
+// few settings.
 package config
 
 import (

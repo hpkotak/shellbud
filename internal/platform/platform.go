@@ -1,4 +1,7 @@
 // Package platform provides OS and shell detection helpers.
+//
+// Deliberately minimal — only what's needed for shell command construction and
+// setup flow branching. No hardware detection, no version parsing.
 package platform
 
 import (

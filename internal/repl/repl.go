@@ -1,6 +1,11 @@
 // Package repl implements the interactive chat loop for ShellBud.
 // It manages conversation history, environment context refresh, and
 // the run/explain/skip command interaction flow.
+//
+// Environment context is refreshed every turn (not cached) because the user's
+// shell state changes between prompts (cd, git operations, file creation).
+// History is capped rather than summarized — token limits are the LLM's problem
+// via context window, not ours.
 package repl
 
 import (

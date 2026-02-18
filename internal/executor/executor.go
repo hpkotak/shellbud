@@ -1,5 +1,10 @@
 // Package executor handles user confirmation and shell command execution.
 // Confirm uses injectable io.Reader/io.Writer for testability.
+//
+// Run inherits the user's terminal (stdin/stdout/stderr) so interactive commands
+// work naturally. RunCapture tees output for conversation context while preserving
+// real-time display. Truncation at MaxOutputBytes prevents conversation bloat from
+// verbose commands.
 package executor
 
 import (
