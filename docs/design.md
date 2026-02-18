@@ -47,6 +47,7 @@ The key differentiator is **deep environment awareness**: ShellBud knows your cw
    │Message │ │Format │ │Explain/│ │patterns │ │load/save│
    │[]      │ │       │ │Skip    │ │         │ │         │
    │Ollama  │ └───────┘ └───┬────┘ └─────────┘ └─────────┘
+   │AFM     │               │
    └───┬────┘               │
        │              ┌─────▼────┐
   ┌────▼────┐         │ Executor │
@@ -83,6 +84,7 @@ type ChatResponse struct {
     Structured   bool
     FinishReason string
     Usage        Usage
+    Warning      string // provider-level notices (e.g., context was trimmed)
 }
 
 type Provider interface {
@@ -102,9 +104,17 @@ type Provider interface {
 Current backends:
 - `ollama` via Ollama `Chat` API
 - `openai` via Chat Completions API
-- `afm` via external bridge executable (`afm.command`) with stdin/stdout JSON contract
+- `afm` via a Swift bridge executable for Apple Foundation Models (macOS 26+, Apple Silicon)
 
 One-shot mode is a single-turn chat for all providers. Chat mode reuses the same provider interface with conversation history.
+
+#### AFM Bridge
+
+FoundationModels.framework is Swift-only and macOS 26+. Rather than linking Swift into the Go binary, `sb` launches a standalone Swift executable (`afm-bridge`) and communicates via stdin/stdout JSON. The Go process writes a request to the bridge's stdin and reads a response from stdout.
+
+The bridge supports an availability probe: `afm-bridge --check-availability` returns `{"available": true}` or `{"available": false, "reason": "device_not_eligible"}`. Setup uses this to decide whether to offer AFM.
+
+The on-device model has a ~4096 token context window. When conversation history exceeds this, the bridge retries with a fresh session (system prompt + latest user message only) and sets `context_trimmed: true` in the response. The Go side surfaces this as `Warning` on `ChatResponse`, displayed separately from the response text.
 
 The system message is rebuilt every turn with fresh environment context (cwd and git state change as commands execute), while conversation history is kept separate and capped at 50 messages.
 
@@ -165,10 +175,11 @@ Three config fields don't need a framework. Raw `gopkg.in/yaml.v3` is simpler an
 ### 8. Setup Flow
 
 First-run setup handles the entire onboarding:
-1. Detect if Ollama is installed → offer to install
-2. Detect if Ollama is running → offer to start
-3. Check for models → offer to pull recommended ones
-4. User picks default model → save config
+
+1. **Platform check:** on macOS, look for `afm-bridge` (PATH first, then `~/.shellbud/bin/`). If found, run `--check-availability`.
+2. **Provider choice (macOS only):** if AFM is available, present a menu — AFM (default) or Ollama. If AFM is unavailable or the bridge isn't found, fall through to Ollama silently.
+3. **AFM path:** save config with `provider=afm` and the resolved bridge path, done.
+4. **Ollama path (all platforms):** detect if Ollama is installed → offer to install. Detect if running → offer to start. Check for models → offer to pull. User picks model → save config.
 
 All actions require user consent. The tool never installs or modifies anything silently.
 
@@ -254,6 +265,8 @@ Loop back to sb> prompt
 | `github.com/spf13/cobra` | CLI framework |
 | `github.com/ollama/ollama/api` | Ollama Chat API client |
 | `gopkg.in/yaml.v3` | Config file parsing |
+
+The Swift bridge (`bridge/afm/`) is not a Go dependency — it is a standalone executable built separately (`make build-bridge`) and distributed alongside the Go binary via Homebrew on macOS arm64.
 
 ## Quality Gates
 

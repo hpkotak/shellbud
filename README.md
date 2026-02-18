@@ -28,7 +28,7 @@ You're on the main branch.
 - **Conversational**: chat mode remembers what you asked and what commands produced
 - **Safe**: destructive commands (`rm`, `sudo`, `dd`) require double confirmation
 - **Fail-closed execution**: commands run only when the model returns valid structured output
-- **Offline-capable**: use local `ollama` or `afm` bridge when you don't want cloud APIs
+- **Offline-capable**: runs entirely on-device with `ollama` or Apple Foundation Models (`afm`)
 - **Run / Explain / Skip**: review commands before executing, ask for explanations
 
 ## Safety Model
@@ -53,6 +53,8 @@ Only commands from valid structured responses are executable. If the model retur
 brew install hpkotak/tap/sb
 ```
 
+On macOS Apple Silicon, this also installs `afm-bridge` for Apple Foundation Models support.
+
 ### From Source
 
 Requires [Go 1.22+](https://go.dev/dl/).
@@ -64,12 +66,13 @@ GOBIN="${GOBIN:-$(go env GOPATH)/bin}" && mv "$GOBIN/shellbud" "$GOBIN/sb"
 
 ### Prerequisites
 
-[Ollama](https://ollama.com) (or another configured provider) must be installed separately.
+- **Ollama (default):** [Ollama](https://ollama.com) must be installed separately. Works on macOS and Linux.
+- **AFM (macOS only):** Requires macOS 26+ on Apple Silicon with Apple Intelligence enabled. No additional install needed — the bridge is included via Homebrew or can be built with `make install-bridge`.
 
 ## Quick Start
 
 ```bash
-# First-time setup (installs Ollama if needed, pulls a model)
+# First-time setup (on macOS, offers AFM or Ollama; configures chosen provider)
 sb setup
 
 # One-shot: ask a question, get a command
@@ -94,12 +97,12 @@ sb config set provider ollama           # ollama | openai | afm
 sb config set model codellama:7b        # Change default model
 sb config set ollama.host http://host:11434  # Custom Ollama host
 sb config set openai.host https://api.openai.com/v1
-sb config set afm.command /usr/local/bin/afm-bridge
+sb config set afm.command ~/.shellbud/bin/afm-bridge
 ```
 
 Provider notes:
 - `openai` reads API key from `OPENAI_API_KEY`.
-- `afm` uses an external executable (`afm.command`) that reads JSON from stdin and returns JSON on stdout: `{"content":"..."}`.
+- `afm` uses a Swift bridge for Apple Foundation Models. The bridge path defaults to `afm-bridge` (found via PATH or `~/.shellbud/bin/`). `sb setup` configures this automatically on macOS.
 
 ## Architecture
 

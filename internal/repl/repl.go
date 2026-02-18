@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	chatTimeout    = 60 * time.Second
+	chatTimeout    = 120 * time.Second
 	maxHistoryMsgs = 50
 )
 
@@ -82,6 +82,10 @@ func Run(p provider.Provider, in io.Reader, out io.Writer) error {
 		if err != nil {
 			_, _ = fmt.Fprintf(out, "Error: %v\n\n", err)
 			continue
+		}
+
+		if result.Warning != "" {
+			_, _ = fmt.Fprintf(out, "\n  Note: %s\n", result.Warning)
 		}
 
 		// Add assistant response to history.

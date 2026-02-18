@@ -47,15 +47,16 @@ git push origin v0.2.0
 Pushing a `v*` tag triggers `.github/workflows/release.yml`, which:
 
 1. Runs `make validate` (same CI gates as PRs)
-2. Builds cross-platform binaries named `sb` (darwin/linux, amd64/arm64)
-3. Creates a GitHub release with archives and checksums
-4. Pushes a Homebrew formula to `hpkotak/homebrew-tap`
+2. Builds `afm-bridge` on a macOS arm64 runner (Xcode 26), packages as tarball with SHA256 checksum
+3. Builds cross-platform Go binaries named `sb` (darwin/linux, amd64/arm64)
+4. Creates a GitHub release with archives, checksums, and the `afm-bridge` tarball
+5. Pushes a Homebrew formula to `hpkotak/homebrew-tap`
 
 ### Distribution
 
-- **Homebrew:** `brew install hpkotak/tap/sb`
-- **GitHub Releases:** download from https://github.com/hpkotak/shellbud/releases
-- **From source:** `go install github.com/hpkotak/shellbud@latest` (binary is named `shellbud`; rename to `sb`)
+- **Homebrew:** `brew install hpkotak/tap/sb` — on macOS Apple Silicon, the formula also installs `afm-bridge` for Apple Foundation Models support
+- **GitHub Releases:** download from https://github.com/hpkotak/shellbud/releases (includes `afm-bridge` tarball for macOS arm64)
+- **From source:** `go install github.com/hpkotak/shellbud@latest` (binary is named `shellbud`; rename to `sb`). For AFM support, also run `make install-bridge` (requires macOS 26+ and Xcode 26)
 
 ### Required Secrets
 

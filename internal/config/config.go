@@ -17,8 +17,12 @@ const (
 	DefaultOllamaHost = "http://localhost:11434"
 	DefaultOpenAIHost = "https://api.openai.com/v1"
 	DefaultAFMCommand = "afm-bridge"
-	DefaultProvider   = "ollama"
-	DefaultModel      = "llama3.2:latest"
+	// DefaultAFMModel is the model name used for AFM. AFM has exactly one
+	// on-device model (SystemLanguageModel.default), so "default" is the
+	// canonical identifier the bridge accepts.
+	DefaultAFMModel = "default"
+	DefaultProvider = "ollama"
+	DefaultModel    = "llama3.2:latest"
 )
 
 var ValidProviders = []string{"ollama", "openai", "afm"}

@@ -30,9 +30,42 @@ jobs:
       - name: Validate
         run: make validate
 
+  build-bridge:
+    runs-on: macos-26  # arm64 runner, Xcode 26 (required for FoundationModels SDK)
+    outputs:
+      bridge_sha256: ${{ steps.checksum.outputs.sha256 }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Build afm-bridge
+        run: cd bridge/afm && swift build -c release --arch arm64
+
+      - name: Package bridge tarball
+        id: package
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          TARBALL="afm-bridge_${TAG}_darwin_arm64.tar.gz"
+          mkdir -p dist/extra
+          tar -czf "dist/extra/${TARBALL}" -C bridge/afm/.build/release afm-bridge
+          echo "tarball=dist/extra/${TARBALL}" >> "$GITHUB_OUTPUT"
+
+      - name: Compute SHA256
+        id: checksum
+        run: |
+          SHA=$(shasum -a 256 "${{ steps.package.outputs.tarball }}" | awk '{print $1}')
+          echo "sha256=${SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload bridge artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: afm-bridge-darwin-arm64
+          path: dist/extra/afm-bridge_*.tar.gz
+          if-no-files-found: error
+
   release:
     runs-on: ubuntu-latest
-    needs: validate
+    needs: [validate, build-bridge]
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -45,6 +78,12 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Download bridge artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: afm-bridge-darwin-arm64
+          path: dist/extra/
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
@@ -53,3 +92,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+          BRIDGE_SHA256: ${{ needs.build-bridge.outputs.bridge_sha256 }}

@@ -1,16 +1,20 @@
-// Package setup handles first-run onboarding: detecting, installing, and
-// configuring Ollama. All actions require explicit user consent.
+// Package setup handles first-run onboarding: detecting available LLM providers
+// (AFM on macOS, Ollama) and configuring the user's choice. All actions require
+// explicit user consent.
 package setup
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -24,17 +28,19 @@ import (
 // Package-level function variables for testability.
 // Tests override these to avoid real exec/network calls.
 var (
-	lookPath          = exec.LookPath
-	execCommand       = exec.Command
-	platformOS        = platform.OS
-	ensureInstalled   = ensureOllamaInstalled
-	ensureRunning     = ensureOllamaRunning
-	newOllamaClient   = ollamaClient
-	chooseModel       = selectModel
-	saveConfig        = config.Save
-	configPath        = config.Path
-	reachabilityCheck = isOllamaReachable
-	sleep             = time.Sleep
+	lookPath             = exec.LookPath
+	osStat               = os.Stat
+	execCommand          = exec.Command
+	platformOS           = platform.OS
+	ensureInstalled      = ensureOllamaInstalled
+	ensureRunning        = ensureOllamaRunning
+	newOllamaClient      = ollamaClient
+	chooseModel          = selectModel
+	saveConfig           = config.Save
+	configPath           = config.Path
+	reachabilityCheck    = isOllamaReachable
+	sleep                = time.Sleep
+	checkAFMAvailability = afmAvailable
 )
 
 // Run executes the interactive setup flow.
@@ -43,6 +49,18 @@ func Run(in io.Reader, out io.Writer) error {
 	_, _ = fmt.Fprintln(out, "ShellBud Setup")
 	_, _ = fmt.Fprintln(out, "==============")
 	_, _ = fmt.Fprintf(out, "Platform: %s\n\n", platformOS())
+
+	// On macOS, offer AFM (Apple Foundation Models) as an alternative to Ollama.
+	if platformOS() == "darwin" {
+		provider, bridgePath, err := offerProviderChoice(in, out)
+		if err != nil {
+			return err
+		}
+		if provider == "afm" {
+			return setupAFM(bridgePath, out)
+		}
+		// provider == "ollama": fall through to the Ollama flow below.
+	}
 
 	if err := ensureInstalled(in, out); err != nil {
 		return err
@@ -76,7 +94,117 @@ func Run(in io.Reader, out io.Writer) error {
 
 	_, _ = fmt.Fprintf(out, "\nConfig saved to %s\n", configPath())
 	_, _ = fmt.Fprintln(out, "Ready! Try: sb compress this folder as tar.gz")
+	_, _ = fmt.Fprintln(out, "Tip: switch providers later with: sb config set provider <name>")
 	return nil
+}
+
+// offerProviderChoice checks for afm-bridge and prompts the user to choose
+// between AFM and Ollama. Returns (provider, bridgePath, error).
+// bridgePath is the resolved executable path when provider=="afm", empty otherwise.
+// If afm-bridge is not installed or AFM is unavailable, returns ("ollama", "", nil).
+func offerProviderChoice(in io.Reader, out io.Writer) (string, string, error) {
+	bridgePath, err := lookPath("afm-bridge")
+	if err != nil {
+		// Bridge not in PATH — check the default install location.
+		home, homeErr := os.UserHomeDir()
+		if homeErr != nil || home == "" {
+			return "ollama", "", nil
+		}
+		candidate := filepath.Join(home, ".shellbud", "bin", "afm-bridge")
+		if _, statErr := osStat(candidate); statErr == nil {
+			bridgePath = candidate
+		} else {
+			// No bridge found; proceed with Ollama.
+			return "ollama", "", nil
+		}
+	}
+
+	available, reason := checkAFMAvailability(bridgePath)
+	if !available {
+		if reason != "" {
+			_, _ = fmt.Fprintf(out, "[!!] AFM not available: %s\n", reason)
+		}
+		return "ollama", "", nil
+	}
+
+	_, _ = fmt.Fprintln(out, "[ok] Apple Foundation Models available")
+	_, _ = fmt.Fprintln(out, "\nChoose a provider:")
+	_, _ = fmt.Fprintln(out, "  1. AFM (Apple Foundation Models — on-device, no setup needed)")
+	_, _ = fmt.Fprintln(out, "  2. Ollama (local model server)")
+
+	const maxAttempts = 3
+	scanner := bufio.NewScanner(in)
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		_, _ = fmt.Fprint(out, "\nSelect [1]: ")
+		if !scanner.Scan() {
+			break
+		}
+		input := strings.TrimSpace(scanner.Text())
+		switch input {
+		case "", "1":
+			return "afm", bridgePath, nil
+		case "2":
+			return "ollama", "", nil
+		default:
+			_, _ = fmt.Fprintf(out, "Invalid selection: %s. Please enter 1 or 2.\n", input)
+		}
+	}
+	return "", "", fmt.Errorf("no valid selection after %d attempts", maxAttempts)
+}
+
+// setupAFM saves config for the AFM provider and prints a success message.
+// bridgePath is the resolved executable path (absolute or in PATH) to save in config.
+func setupAFM(bridgePath string, out io.Writer) error {
+	if bridgePath == "" {
+		bridgePath = config.DefaultAFMCommand
+	}
+	cfg := &config.Config{
+		Provider: "afm",
+		Model:    config.DefaultAFMModel,
+		Ollama:   config.Ollama{Host: config.DefaultOllamaHost},
+		OpenAI:   config.OpenAI{Host: config.DefaultOpenAIHost},
+		AFM:      config.AFM{Command: bridgePath},
+	}
+	if err := saveConfig(cfg); err != nil {
+		return fmt.Errorf("saving config: %w", err)
+	}
+	_, _ = fmt.Fprintf(out, "\nConfig saved to %s\n", configPath())
+	_, _ = fmt.Fprintln(out, "Ready! Using Apple Foundation Models. Try: sb list files here")
+	_, _ = fmt.Fprintln(out, "Tip: switch providers later with: sb config set provider <name>")
+	return nil
+}
+
+// afmAvailable runs the bridge with --check-availability and returns whether
+// AFM is available. Returns (true, "") on success, (false, reason) otherwise.
+func afmAvailable(bridgePath string) (bool, string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var stdout, stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, bridgePath, "--check-availability")
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		errText := strings.TrimSpace(stderr.String())
+		if errText != "" {
+			return false, fmt.Sprintf("bridge execution failed: %s", errText)
+		}
+		return false, "bridge execution failed"
+	}
+
+	var result struct {
+		Available bool   `json:"available"`
+		Reason    string `json:"reason,omitempty"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		errText := strings.TrimSpace(stderr.String())
+		if errText != "" {
+			return false, fmt.Sprintf("could not parse bridge response: %s", errText)
+		}
+		return false, "could not parse bridge response"
+	}
+	return result.Available, result.Reason
 }
 
 func ensureOllamaInstalled(in io.Reader, out io.Writer) error {

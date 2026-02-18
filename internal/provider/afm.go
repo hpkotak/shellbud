@@ -119,9 +119,10 @@ func (a *AFMProvider) Chat(ctx context.Context, req ChatRequest) (ChatResponse, 
 	}
 
 	var decoded struct {
-		Content      string `json:"content"`
-		FinishReason string `json:"finish_reason,omitempty"`
-		Usage        struct {
+		Content        string `json:"content"`
+		FinishReason   string `json:"finish_reason,omitempty"`
+		ContextTrimmed bool   `json:"context_trimmed,omitempty"`
+		Usage          struct {
 			InputTokens  int `json:"input_tokens,omitempty"`
 			OutputTokens int `json:"output_tokens,omitempty"`
 			TotalTokens  int `json:"total_tokens,omitempty"`
@@ -134,6 +135,11 @@ func (a *AFMProvider) Chat(ctx context.Context, req ChatRequest) (ChatResponse, 
 	result := strings.TrimSpace(decoded.Content)
 	if result == "" {
 		return ChatResponse{}, fmt.Errorf("empty response from model")
+	}
+
+	var warning string
+	if decoded.ContextTrimmed {
+		warning = "conversation history was too long and was trimmed"
 	}
 
 	usage := Usage{
@@ -151,6 +157,7 @@ func (a *AFMProvider) Chat(ctx context.Context, req ChatRequest) (ChatResponse, 
 		Structured:   isStructuredJSON(req.ExpectJSON, result),
 		FinishReason: decoded.FinishReason,
 		Usage:        usage,
+		Warning:      warning,
 	}, nil
 }
 

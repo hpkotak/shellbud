@@ -88,7 +88,7 @@ func runTranslate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("creating provider: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
 	query := strings.Join(args, " ")
@@ -106,6 +106,10 @@ func runTranslate(cmd *cobra.Command, args []string) error {
 	})
 	if err != nil {
 		return fmt.Errorf("query failed: %w", err)
+	}
+
+	if resp.Warning != "" {
+		_, _ = fmt.Fprintf(ioOut, "\n  Note: %s\n", resp.Warning)
 	}
 
 	parsed := prompt.ParseChatResponse(resp.Text)

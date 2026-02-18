@@ -23,6 +23,10 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+release:
+  extra_files:
+    - glob: dist/extra/afm-bridge_*.tar.gz
+
 changelog:
   sort: asc
   filters:
@@ -42,5 +46,20 @@ brews:
     license: MIT
     install: |
       bin.install "sb"
+    extra_install: |
+      on_macos do
+        on_arm do
+          resource("afm-bridge").stage { bin.install "afm-bridge" }
+        end
+      end
+    custom_block: |
+      on_macos do
+        on_arm do
+          resource "afm-bridge" do
+            url "https://github.com/hpkotak/shellbud/releases/download/{{ .Tag }}/afm-bridge_{{ .Tag }}_darwin_arm64.tar.gz"
+            sha256 "{{ .Env.BRIDGE_SHA256 }}"
+          end
+        end
+      end
     test: |
       system bin/"sb", "--version"

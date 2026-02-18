@@ -38,6 +38,10 @@ type ChatResponse struct {
 	FinishReason string
 	// Usage is token usage metadata, when available.
 	Usage Usage
+	// Warning is an optional provider-level notice (e.g., context was trimmed).
+	// Callers should display this separately from Text to avoid corrupting
+	// structured response parsing.
+	Warning string
 }
 
 // Capabilities describes optional provider features.

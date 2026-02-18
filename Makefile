@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 GOIMPORTS ?= goimports
 
-.PHONY: fmt fmt-check ensure-goimports test test-race vet lint coverage validate validate-ci hooks build release-dry-run
+.PHONY: fmt fmt-check ensure-goimports test test-race vet lint coverage validate validate-ci hooks build release-dry-run build-bridge install-bridge package-bridge
 
 fmt:
 	@$(MAKE) ensure-goimports
@@ -55,3 +55,16 @@ build:
 
 release-dry-run:
 	goreleaser release --snapshot --clean
+
+# Bridge targets — macOS only, not included in validate (CI runs on Ubuntu).
+build-bridge:
+	cd bridge/afm && swift build -c release --arch arm64
+
+install-bridge: build-bridge
+	mkdir -p ~/.shellbud/bin
+	cp bridge/afm/.build/release/afm-bridge ~/.shellbud/bin/afm-bridge
+
+package-bridge: build-bridge
+	mkdir -p dist/extra
+	tar -czf dist/extra/afm-bridge_dev_darwin_arm64.tar.gz \
+		-C bridge/afm/.build/release afm-bridge

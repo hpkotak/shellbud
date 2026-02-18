@@ -14,6 +14,8 @@ make coverage                  # Enforced coverage thresholds
 make validate                  # Full validation pipeline
 make hooks                     # Install local pre-commit hook (runs make validate)
 make release-dry-run           # goreleaser snapshot (no publish)
+make build-bridge              # Build afm-bridge Swift binary (macOS only)
+make install-bridge            # Build + install afm-bridge to ~/.shellbud/bin/
 ```
 
 ## Project Structure
@@ -31,6 +33,7 @@ make release-dry-run           # goreleaser snapshot (no publish)
 - `internal/config/` — Config file management (~/.shellbud/config.yaml)
 - `internal/setup/` — First-run interactive setup flow
 - `internal/platform/` — OS/shell detection
+- `bridge/afm/` — Swift CLI that calls Apple Foundation Models (macOS 26+, Apple Silicon)
 
 ## Conventions
 
@@ -77,6 +80,10 @@ make release-dry-run                 # goreleaser snapshot (no publish)
 
 - `GITHUB_TOKEN` — automatic in Actions (release assets)
 - `TAP_GITHUB_TOKEN` — fine-grained PAT with Contents read/write on `hpkotak/homebrew-tap`
+
+## Git Commits
+
+- Never include `Co-Authored-By` in commit messages
 
 ## Pre-Commit Checklist
 

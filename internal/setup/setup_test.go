@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -21,6 +22,7 @@ import (
 func saveFuncVars(t *testing.T) func() {
 	t.Helper()
 	origLookPath := lookPath
+	origOsStat := osStat
 	origExecCommand := execCommand
 	origPlatformOS := platformOS
 	origEnsureInstalled := ensureInstalled
@@ -31,8 +33,10 @@ func saveFuncVars(t *testing.T) func() {
 	origConfigPath := configPath
 	origReachabilityCheck := reachabilityCheck
 	origSleep := sleep
+	origCheckAFMAvailability := checkAFMAvailability
 	return func() {
 		lookPath = origLookPath
+		osStat = origOsStat
 		execCommand = origExecCommand
 		platformOS = origPlatformOS
 		ensureInstalled = origEnsureInstalled
@@ -43,6 +47,7 @@ func saveFuncVars(t *testing.T) func() {
 		configPath = origConfigPath
 		reachabilityCheck = origReachabilityCheck
 		sleep = origSleep
+		checkAFMAvailability = origCheckAFMAvailability
 	}
 }
 
@@ -142,10 +147,11 @@ func TestOllamaClient(t *testing.T) {
 }
 
 func TestRun(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
+	t.Run("success on non-darwin", func(t *testing.T) {
 		restore := saveFuncVars(t)
 		defer restore()
 
+		platformOS = func() string { return "linux" }
 		var gotCfg *config.Config
 		ensureInstalled = func(_ io.Reader, _ io.Writer) error { return nil }
 		ensureRunning = func(host string, _ io.Reader, _ io.Writer) error {
@@ -255,6 +261,7 @@ func TestRun(t *testing.T) {
 			restore := saveFuncVars(t)
 			defer restore()
 
+			platformOS = func() string { return "linux" }
 			ensureInstalled = func(_ io.Reader, _ io.Writer) error { return nil }
 			ensureRunning = func(string, io.Reader, io.Writer) error { return nil }
 			newOllamaClient = func(string) (*api.Client, error) { return &api.Client{}, nil }
@@ -273,6 +280,381 @@ func TestRun(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestRunWithAFMOnDarwin tests the full Run() flow on darwin with AFM chosen.
+func TestRunWithAFMOnDarwin(t *testing.T) {
+	t.Run("AFM chosen, config saved with provider=afm and full bridge path", func(t *testing.T) {
+		restore := saveFuncVars(t)
+		defer restore()
+
+		platformOS = func() string { return "darwin" }
+		lookPath = func(file string) (string, error) {
+			if file == "afm-bridge" {
+				return "/usr/local/bin/afm-bridge", nil
+			}
+			return "", exec.ErrNotFound
+		}
+		checkAFMAvailability = func(_ string) (bool, string) { return true, "" }
+
+		var gotCfg *config.Config
+		saveConfig = func(cfg *config.Config) error {
+			gotCfg = cfg
+			return nil
+		}
+		configPath = func() string { return "/tmp/test-config.yaml" }
+
+		out := &bytes.Buffer{}
+		err := Run(strings.NewReader("1\n"), out)
+		if err != nil {
+			t.Fatalf("Run() unexpected error: %v", err)
+		}
+
+		if gotCfg == nil {
+			t.Fatal("Run() should save config")
+		}
+		if gotCfg.Provider != "afm" {
+			t.Errorf("provider = %q, want %q", gotCfg.Provider, "afm")
+		}
+		if gotCfg.Model != config.DefaultAFMModel {
+			t.Errorf("model = %q, want %q", gotCfg.Model, config.DefaultAFMModel)
+		}
+		if gotCfg.AFM.Command != "/usr/local/bin/afm-bridge" {
+			t.Errorf("afm command = %q, want full path %q", gotCfg.AFM.Command, "/usr/local/bin/afm-bridge")
+		}
+	})
+
+	t.Run("Ollama chosen on darwin falls through to Ollama flow", func(t *testing.T) {
+		restore := saveFuncVars(t)
+		defer restore()
+
+		platformOS = func() string { return "darwin" }
+		lookPath = func(file string) (string, error) {
+			if file == "afm-bridge" {
+				return "/usr/local/bin/afm-bridge", nil
+			}
+			return "/usr/local/bin/ollama", nil
+		}
+		checkAFMAvailability = func(_ string) (bool, string) { return true, "" }
+		ensureInstalled = func(_ io.Reader, _ io.Writer) error { return nil }
+		ensureRunning = func(string, io.Reader, io.Writer) error { return nil }
+		newOllamaClient = func(string) (*api.Client, error) { return &api.Client{}, nil }
+		chooseModel = func(*api.Client, io.Reader, io.Writer) (string, error) { return "llama3.2:3b", nil }
+
+		var gotCfg *config.Config
+		saveConfig = func(cfg *config.Config) error {
+			gotCfg = cfg
+			return nil
+		}
+		configPath = func() string { return "/tmp/test-config.yaml" }
+
+		out := &bytes.Buffer{}
+		// User selects "2" for Ollama.
+		err := Run(strings.NewReader("2\n"), out)
+		if err != nil {
+			t.Fatalf("Run() unexpected error: %v", err)
+		}
+
+		if gotCfg == nil {
+			t.Fatal("Run() should save config")
+		}
+		if gotCfg.Provider != "ollama" {
+			t.Errorf("provider = %q, want %q", gotCfg.Provider, "ollama")
+		}
+	})
+}
+
+// TestOfferProviderChoice tests the provider selection logic.
+func TestOfferProviderChoice(t *testing.T) {
+	tests := []struct {
+		name           string
+		bridgeFound    bool
+		afmAvailable   bool
+		afmReason      string
+		input          string
+		wantProvider   string
+		wantBridgePath string // non-empty only when wantProvider=="afm"
+		wantErr        string
+	}{
+		{
+			name:         "bridge not found → ollama",
+			bridgeFound:  false,
+			wantProvider: "ollama",
+		},
+		{
+			name:         "bridge found but AFM unavailable → ollama",
+			bridgeFound:  true,
+			afmAvailable: false,
+			afmReason:    "device_not_eligible",
+			wantProvider: "ollama",
+		},
+		{
+			name:           "AFM available, user picks AFM (default)",
+			bridgeFound:    true,
+			afmAvailable:   true,
+			input:          "\n",
+			wantProvider:   "afm",
+			wantBridgePath: "/usr/local/bin/afm-bridge",
+		},
+		{
+			name:           "AFM available, user picks AFM explicitly",
+			bridgeFound:    true,
+			afmAvailable:   true,
+			input:          "1\n",
+			wantProvider:   "afm",
+			wantBridgePath: "/usr/local/bin/afm-bridge",
+		},
+		{
+			name:         "AFM available, user picks Ollama",
+			bridgeFound:  true,
+			afmAvailable: true,
+			input:        "2\n",
+			wantProvider: "ollama",
+		},
+		{
+			name:         "all invalid selections exhausts retries → error",
+			bridgeFound:  true,
+			afmAvailable: true,
+			input:        "9\n8\n7\n",
+			wantErr:      "no valid selection",
+		},
+		{
+			name:           "invalid then valid selection → succeeds",
+			bridgeFound:    true,
+			afmAvailable:   true,
+			input:          "9\n1\n",
+			wantProvider:   "afm",
+			wantBridgePath: "/usr/local/bin/afm-bridge",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			restore := saveFuncVars(t)
+			defer restore()
+
+			if tt.bridgeFound {
+				lookPath = func(file string) (string, error) {
+					if file == "afm-bridge" {
+						return "/usr/local/bin/afm-bridge", nil
+					}
+					return "", exec.ErrNotFound
+				}
+				checkAFMAvailability = func(_ string) (bool, string) {
+					return tt.afmAvailable, tt.afmReason
+				}
+			} else {
+				lookPath = func(string) (string, error) { return "", exec.ErrNotFound }
+				osStat = func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
+			}
+
+			in := strings.NewReader(tt.input)
+			out := &bytes.Buffer{}
+			gotProvider, gotBridgePath, err := offerProviderChoice(in, out)
+
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("error = %q, want substring %q", err.Error(), tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if gotProvider != tt.wantProvider {
+				t.Errorf("provider = %q, want %q", gotProvider, tt.wantProvider)
+			}
+			if tt.wantBridgePath != "" && gotBridgePath != tt.wantBridgePath {
+				t.Errorf("bridgePath = %q, want %q", gotBridgePath, tt.wantBridgePath)
+			}
+			if tt.wantProvider != "afm" && gotBridgePath != "" {
+				t.Errorf("bridgePath should be empty for provider=%q, got %q", tt.wantProvider, gotBridgePath)
+			}
+		})
+	}
+}
+
+// TestSetupAFM verifies that setupAFM saves the correct config values.
+func TestSetupAFM(t *testing.T) {
+	t.Run("saves full bridge path", func(t *testing.T) {
+		restore := saveFuncVars(t)
+		defer restore()
+
+		var gotCfg *config.Config
+		saveConfig = func(cfg *config.Config) error {
+			gotCfg = cfg
+			return nil
+		}
+		configPath = func() string { return "/tmp/test-config.yaml" }
+
+		out := &bytes.Buffer{}
+		if err := setupAFM("/usr/local/bin/afm-bridge", out); err != nil {
+			t.Fatalf("setupAFM() unexpected error: %v", err)
+		}
+
+		if gotCfg == nil {
+			t.Fatal("setupAFM() should save config")
+		}
+		if gotCfg.Provider != "afm" {
+			t.Errorf("provider = %q, want %q", gotCfg.Provider, "afm")
+		}
+		if gotCfg.Model != config.DefaultAFMModel {
+			t.Errorf("model = %q, want %q", gotCfg.Model, config.DefaultAFMModel)
+		}
+		if gotCfg.AFM.Command != "/usr/local/bin/afm-bridge" {
+			t.Errorf("afm command = %q, want %q", gotCfg.AFM.Command, "/usr/local/bin/afm-bridge")
+		}
+		if gotCfg.Ollama.Host != config.DefaultOllamaHost {
+			t.Errorf("ollama host = %q, want %q", gotCfg.Ollama.Host, config.DefaultOllamaHost)
+		}
+		if !strings.Contains(out.String(), "Config saved") {
+			t.Errorf("output should mention config saved, got:\n%s", out.String())
+		}
+	})
+
+	t.Run("falls back to DefaultAFMCommand when path is empty", func(t *testing.T) {
+		restore := saveFuncVars(t)
+		defer restore()
+
+		var gotCfg *config.Config
+		saveConfig = func(cfg *config.Config) error { gotCfg = cfg; return nil }
+		configPath = func() string { return "/tmp/test-config.yaml" }
+
+		if err := setupAFM("", &bytes.Buffer{}); err != nil {
+			t.Fatalf("setupAFM() unexpected error: %v", err)
+		}
+		if gotCfg.AFM.Command != config.DefaultAFMCommand {
+			t.Errorf("afm command = %q, want default %q", gotCfg.AFM.Command, config.DefaultAFMCommand)
+		}
+	})
+}
+
+// TestSetupAFMSaveError verifies error propagation from saveConfig.
+func TestSetupAFMSaveError(t *testing.T) {
+	restore := saveFuncVars(t)
+	defer restore()
+
+	saveConfig = func(*config.Config) error { return errors.New("disk full") }
+
+	err := setupAFM("/usr/local/bin/afm-bridge", &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "saving config: disk full") {
+		t.Errorf("error = %q, want substring %q", err.Error(), "saving config: disk full")
+	}
+}
+
+// TestAFMAvailable tests the bridge invocation logic with a fake bridge script.
+func TestAFMAvailable(t *testing.T) {
+	t.Run("bridge returns available=true", func(t *testing.T) {
+		// Create a fake bridge script that prints available JSON.
+		script := `#!/bin/sh
+echo '{"available":true}'`
+		path := writeTempScript(t, script)
+
+		ok, reason := afmAvailable(path)
+		if !ok {
+			t.Errorf("afmAvailable() = false, want true (reason: %s)", reason)
+		}
+		if reason != "" {
+			t.Errorf("reason = %q, want empty", reason)
+		}
+	})
+
+	t.Run("bridge returns available=false with reason", func(t *testing.T) {
+		script := `#!/bin/sh
+echo '{"available":false,"reason":"device_not_eligible"}'`
+		path := writeTempScript(t, script)
+
+		ok, reason := afmAvailable(path)
+		if ok {
+			t.Error("afmAvailable() = true, want false")
+		}
+		if reason != "device_not_eligible" {
+			t.Errorf("reason = %q, want %q", reason, "device_not_eligible")
+		}
+	})
+
+	t.Run("bridge exits with non-zero → unavailable", func(t *testing.T) {
+		script := `#!/bin/sh
+exit 1`
+		path := writeTempScript(t, script)
+
+		ok, reason := afmAvailable(path)
+		if ok {
+			t.Error("afmAvailable() = true for failing bridge, want false")
+		}
+		if reason != "bridge execution failed" {
+			t.Errorf("reason = %q, want %q", reason, "bridge execution failed")
+		}
+	})
+
+	t.Run("bridge exits non-zero with stderr → reason includes stderr", func(t *testing.T) {
+		script := `#!/bin/sh
+echo "framework not found" >&2
+exit 1`
+		path := writeTempScript(t, script)
+
+		ok, reason := afmAvailable(path)
+		if ok {
+			t.Error("afmAvailable() = true for failing bridge, want false")
+		}
+		if !strings.Contains(reason, "framework not found") {
+			t.Errorf("reason = %q, want substring %q", reason, "framework not found")
+		}
+	})
+
+	t.Run("bridge prints invalid JSON → unavailable", func(t *testing.T) {
+		script := `#!/bin/sh
+echo 'not json'`
+		path := writeTempScript(t, script)
+
+		ok, reason := afmAvailable(path)
+		if ok {
+			t.Error("afmAvailable() = true for invalid JSON, want false")
+		}
+		if reason != "could not parse bridge response" {
+			t.Errorf("reason = %q, want %q", reason, "could not parse bridge response")
+		}
+	})
+
+	t.Run("bridge prints invalid JSON with stderr → reason includes stderr", func(t *testing.T) {
+		script := `#!/bin/sh
+echo "warning: deprecated API" >&2
+echo 'not json'`
+		path := writeTempScript(t, script)
+
+		ok, reason := afmAvailable(path)
+		if ok {
+			t.Error("afmAvailable() = true for invalid JSON, want false")
+		}
+		if !strings.Contains(reason, "warning: deprecated API") {
+			t.Errorf("reason = %q, want substring %q", reason, "warning: deprecated API")
+		}
+	})
+}
+
+// writeTempScript writes a shell script to a temp file and makes it executable.
+func writeTempScript(t *testing.T, content string) string {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "fake-bridge-*.sh")
+	if err != nil {
+		t.Fatalf("creating temp script: %v", err)
+	}
+	if _, err := f.WriteString(content); err != nil {
+		t.Fatalf("writing temp script: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("closing temp script: %v", err)
+	}
+	if err := os.Chmod(f.Name(), 0o755); err != nil {
+		t.Fatalf("chmod temp script: %v", err)
+	}
+	return f.Name()
 }
 
 func TestSelectModel(t *testing.T) {

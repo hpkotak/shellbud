@@ -23,6 +23,7 @@ go.work.sum
 
 # env file
 .env
+.editorconfig
 
 # Project binaries
 sb
@@ -30,3 +31,6 @@ shellbud
 
 # GoReleaser output
 dist/
+
+# Swift bridge build artifacts
+bridge/afm/.build/
