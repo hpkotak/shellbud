@@ -143,6 +143,8 @@ Destructive command detection uses compiled regex patterns, not LLM classificati
 - One-shot mode: safe commands show "Run this? [Y/n]" (default yes), destructive show "Are you sure? [y/N]" (default no)
 - Chat mode: all commands show "[r]un / [e]xplain / [s]kip", destructive commands require an additional "Are you sure? [y/N]" confirmation after choosing run
 
+See [docs/decisions.md](decisions.md) for the documented decision to stay with regex over shell AST parsing (`mvdan.cc/sh`).
+
 ### 5. Structured Response Parsing (Fail Closed)
 
 The LLM is instructed to return only JSON with this schema:

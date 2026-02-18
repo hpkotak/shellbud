@@ -21,8 +21,8 @@ make install-bridge            # Build + install afm-bridge to ~/.shellbud/bin/
 ## Project Structure
 
 - `main.go` — Entry point, delegates to `cmd.Execute()`
-- `cmd/` — Cobra command tree: root (one-shot), `chat`, `setup`, `config show`, `config set`, `version`
-  - `Execute()` is the entry point; `--model` flag overrides config model for any command
+- `cmd/` — Cobra command tree: root (one-shot), `chat`, `setup`, `config show`, `config set`; version exposed as `--version` flag (Cobra built-in via `rootCmd.Version`)
+  - `Execute()` is the entry point; `--model` flag overrides config model for query and chat commands
   - One-shot (`sb "query"`) gathers env context, sends single LLM request, offers run/skip per command
 - `internal/provider/` — LLM provider interface + Ollama/OpenAI/AFM implementations
   - `Provider` interface: `Chat(ctx, ChatRequest) (ChatResponse, error)`, `Name() string`, `Capabilities() Capabilities`, `Available(ctx) error`

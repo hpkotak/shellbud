@@ -80,9 +80,6 @@ func TestClassifyComplexCommands(t *testing.T) {
 		{"sudo in chain", "apt update && sudo apt upgrade -y", Destructive},
 		{"subshell with rm", "(cd /tmp && rm -rf test)", Destructive},
 		{"find -exec rm", "find . -name '*.tmp' -exec rm {} \\;", Destructive},
-		// Note: "echo 'data' > /dev/sda" is NOT caught because the \b>\s*/dev/
-		// pattern requires a word boundary before >. This is a known gap.
-		// A redirect like "cmd> /dev/sda" (no space before >) would be caught.
 		{"write to device with dd", "dd if=/dev/zero of=/dev/sda bs=512", Destructive},
 		{"truncate pattern", ": > /var/log/app.log", Destructive},
 		{"shred in pipe", "find . -name '*.key' -exec shred {} \\;", Destructive},
@@ -96,6 +93,34 @@ func TestClassifyComplexCommands(t *testing.T) {
 		{"safe find", "find . -name '*.go' -exec wc -l {} +", Safe},
 	}
 
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Classify(tt.command)
+			if got != tt.want {
+				t.Errorf("Classify(%q) = %v, want %v", tt.command, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestClassifyDeviceRedirection(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+		want    Level
+	}{
+		// Previously bypassed — space before > broke \b anchor
+		{"redirect to block device", "echo data > /dev/sda", Destructive},
+		{"append to block device", "echo data >> /dev/sda", Destructive},
+		{"stderr redirect to device", "echo foo 2>/dev/sda", Destructive},
+		{"combined redirect to device", "cmd &>/dev/sda", Destructive},
+		{"no-space redirect to device", "cmd>/dev/sda", Destructive},
+		{"redirect to mem", "cat file > /dev/mem", Destructive},
+		// Safe pseudo-devices — must not be flagged
+		{"redirect to /dev/null", "echo foo > /dev/null", Safe},
+		{"redirect to /dev/stdout", "echo foo > /dev/stdout", Safe},
+		{"redirect to /dev/stderr", "echo foo > /dev/stderr", Safe},
+	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := Classify(tt.command)
