@@ -35,3 +35,7 @@ extra/
 
 # Swift bridge build artifacts
 bridge/afm/.build/
+
+# Local planning/review artifacts
+docs/next-roadmap-items.md
+docs/portfolio.md

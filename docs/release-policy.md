@@ -52,6 +52,24 @@ Pushing a `v*` tag triggers `.github/workflows/release.yml`, which:
 4. Creates a GitHub release with archives, checksums, and the `afm-bridge` tarball
 5. Pushes a Homebrew formula to `hpkotak/homebrew-tap`
 
+### Bridge Artifact Contract
+
+The `build-bridge` job (macOS arm64, Xcode 26) produces a tarball and SHA256 that the
+`release` job consumes:
+
+1. Tarball name: `afm-bridge_${TAG}_darwin_arm64.tar.gz` — placed in `extra/` by
+   `actions/download-artifact`
+2. goreleaser picks it up via `release.extra_files: glob: extra/afm-bridge_*.tar.gz`
+3. SHA256 is passed as `BRIDGE_SHA256` env var → embedded in the Homebrew formula via
+   `{{ .Env.BRIDGE_SHA256 }}`
+
+**Homebrew conditional install:** the formula installs `afm-bridge` only on macOS Apple
+Silicon (`on_macos { on_arm { ... } }`). On Intel macOS and Linux, `sb` installs without
+the bridge — AFM is unavailable on those platforms regardless.
+
+If you change the tarball filename pattern, update both `.goreleaser.yml:release.extra_files`
+and the `custom_block` URL in the `brews` config.
+
 ### Distribution
 
 - **Homebrew:** `brew install hpkotak/tap/sb` — on macOS Apple Silicon, the formula also installs `afm-bridge` for Apple Foundation Models support

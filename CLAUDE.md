@@ -6,6 +6,8 @@ Context-aware shell assistant — interact with your shell in natural language. 
 
 ```bash
 make build                     # Build sb binary locally
+make fmt                       # Auto-format Go files with goimports
+make fmt-check                 # Check formatting without modifying files
 go test ./...                  # Run all tests
 go test -race ./...            # Race detection
 go vet ./...                   # Static analysis
@@ -107,6 +109,15 @@ make release-dry-run                 # goreleaser snapshot (no publish)
 
 - `GITHUB_TOKEN` — automatic in Actions (release assets)
 - `TAP_GITHUB_TOKEN` — fine-grained PAT with Contents read/write on `hpkotak/homebrew-tap`
+
+## Local-Only Docs (gitignored)
+
+These files exist on disk but are not tracked in git:
+
+- `docs/next-roadmap-items.md` — open findings, known gaps, suggested next work
+- `docs/portfolio.md` — skills narrative and framing for interview context
+
+Both are listed under "Local planning/review artifacts" in `.gitignore`. Read them when planning work or reviewing gaps; do not commit them.
 
 ## Git Commits
 

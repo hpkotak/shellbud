@@ -156,6 +156,14 @@ This configures Git to use `.githooks/pre-commit`, which runs `make validate`.
 
 For branch protection and risk-based review setup, see [docs/release-policy.md](docs/release-policy.md).
 
+## Documentation
+
+| File | Contents |
+|------|----------|
+| [docs/design.md](docs/design.md) | Architecture, data flow, and key design decisions |
+| [docs/decisions.md](docs/decisions.md) | Architecture Decision Records (ADRs) |
+| [docs/release-policy.md](docs/release-policy.md) | Release process, versioning, and branch protection |
+
 ## License
 
 MIT
