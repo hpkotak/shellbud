@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/hpkotak/shellbud/internal/config"
 	"github.com/hpkotak/shellbud/internal/repl"
@@ -40,6 +42,12 @@ func runChat(cmd *cobra.Command, args []string) error {
 	p, err := newProvider(cfg, model)
 	if err != nil {
 		return fmt.Errorf("creating provider: %w", err)
+	}
+
+	checkCtx, checkCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer checkCancel()
+	if err := p.Available(checkCtx); err != nil {
+		return fmt.Errorf("provider not ready: %w\n\nRun 'sb setup' to reconfigure", err)
 	}
 
 	return repl.Run(p, ioIn, ioOut)

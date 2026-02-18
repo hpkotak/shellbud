@@ -88,6 +88,12 @@ func runTranslate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("creating provider: %w", err)
 	}
 
+	checkCtx, checkCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer checkCancel()
+	if err := p.Available(checkCtx); err != nil {
+		return fmt.Errorf("provider not ready: %w\n\nRun 'sb setup' to reconfigure", err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
