@@ -82,22 +82,22 @@ func (s Snapshot) Format() string {
 		if s.GitDirty {
 			status = "dirty"
 		}
-		fmt.Fprintf(&b, "Git branch: %s (%s)\n", s.GitBranch, status)
+		fmt.Fprintf(&b, "Git branch: %s (%s)\n", sanitizeField(s.GitBranch), status)
 	}
 
 	if s.GitRecent != "" {
-		fmt.Fprintf(&b, "Recent commits:\n%s\n", s.GitRecent)
+		fmt.Fprintf(&b, "Recent commits:\n%s\n", sanitizeField(s.GitRecent))
 	}
 
 	if s.DirList != "" {
-		fmt.Fprintf(&b, "Directory contents:\n%s\n", s.DirList)
+		fmt.Fprintf(&b, "Directory contents:\n%s\n", sanitizeField(s.DirList))
 	}
 
 	if len(s.Env) > 0 {
 		fmt.Fprintf(&b, "Environment:\n")
 		for _, key := range envVarAllowlist {
 			if val, ok := s.Env[key]; ok {
-				fmt.Fprintf(&b, "  %s=%s\n", key, val)
+				fmt.Fprintf(&b, "  %s=%s\n", key, sanitizeField(val))
 			}
 		}
 	}
@@ -145,6 +145,15 @@ func gatherGitRecent(ctx context.Context) string {
 		return ""
 	}
 	return strings.TrimSpace(out)
+}
+
+// sanitizeField replaces embedded newlines in untrusted shell data so they
+// cannot inject new sections into the system prompt.
+func sanitizeField(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", " ↵ ")
+	s = strings.ReplaceAll(s, "\n", " ↵ ")
+	s = strings.ReplaceAll(s, "\r", " ↵ ")
+	return s
 }
 
 func truncateLines(s string, max int) string {

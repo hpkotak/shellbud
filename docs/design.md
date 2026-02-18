@@ -134,6 +134,10 @@ The `shellenv` package gathers a best-effort snapshot before each LLM call:
 
 Individual failures are swallowed — not in a git repo? `GitBranch` is just empty. The snapshot is always best-effort, never an error.
 
+**Injection hardening:** Fields sourced from external command output (`GitBranch`, `GitRecent`, `DirList`, and env var values) pass through `sanitizeField()` before being embedded in the system prompt. This collapses embedded newlines (`\n`, `\r\n`, `\r`) to ` ↵ `, preventing injected content from starting a new prompt line. The formatted snapshot is then wrapped in `<environment>...</environment>` XML tags with an explicit model instruction to treat the block as opaque data. `CWD` and `OS`/`Shell`/`Arch` are trusted (from `os.Getwd()` and `runtime.GOOS`) and are not sanitized.
+
+See [docs/decisions.md](decisions.md) ADR-002 for the rationale behind the chosen approach.
+
 ### 4. Safety: Regex, Not LLM
 
 Destructive command detection uses compiled regex patterns, not LLM classification.
@@ -196,6 +200,9 @@ User input          "what git branch am I on"
 Config load         ~/.shellbud/config.yaml → provider, model, host
     │
     ▼
+Preflight           p.Available() with 10s timeout → fail fast if misconfigured
+    │
+    ▼
 Environment         shellenv.Gather() → cwd, git, dir listing, OS, env vars
     │
     ▼
@@ -226,6 +233,15 @@ ParseChatResponse   Validate JSON schema, normalize commands
 ### Chat Mode (`sb chat`)
 
 ```
+sb chat
+    │
+    ▼
+Config load            ~/.shellbud/config.yaml → provider, model, host
+    │
+    ▼
+Preflight              p.Available() with 10s timeout → fail fast if misconfigured
+    │
+    ▼
 sb> prompt
     │
     ▼

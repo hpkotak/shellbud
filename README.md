@@ -28,6 +28,8 @@ You're on the main branch.
 - **Conversational**: chat mode remembers what you asked and what commands produced
 - **Safe**: destructive commands (`rm`, `sudo`, `dd`) require double confirmation
 - **Fail-closed execution**: commands run only when the model returns valid structured output
+- **Injection-hardened**: untrusted env data (commit messages, filenames, env vars) is delimited and sanitized before reaching the LLM
+- **Preflight checks**: provider availability verified before first query — misconfiguration fails fast with an actionable `sb setup` hint
 - **Offline-capable**: runs entirely on-device with `ollama` or Apple Foundation Models (`afm`)
 - **Run / Explain / Skip**: review commands before executing, ask for explanations
 
@@ -44,6 +46,13 @@ ShellBud enforces JSON mode per provider when available (`ollama`/`openai`) and 
 Only commands from valid structured responses are executable. If the model returns malformed or unstructured output, ShellBud still displays it, but does not offer command execution.
 
 `explain` responses in chat mode are displayed as plain assistant text and are never treated as executable command payloads.
+
+### Prompt Injection Hardening
+
+Environment data gathered from the shell (git commit messages, branch names, directory listings, env var values) is potentially untrusted. ShellBud defends against prompt injection in two ways:
+
+1. **Newline sanitization** — embedded newlines in untrusted fields are replaced with ` ↵ ` before the snapshot is embedded in the system prompt. This prevents injected content from appearing as a new line (and thus a new instruction) in the prompt.
+2. **Explicit delimiters** — the entire environment block is wrapped in `<environment>...</environment>` XML tags with an explicit instruction to the model to treat that content as opaque data, not instructions.
 
 ## Install
 
